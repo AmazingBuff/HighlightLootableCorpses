@@ -4,12 +4,12 @@
 
 #include "mask_passes.h"
 
-#include "mask_geometry.h"
-
 #include "render/shader_manager.h"
 #include "render/shader_sources.h"
 
 #include "render/dx11/common_states.h"
+
+#include "render/geometry/render_geometry.h"
 
 MASK_NAMESPACE_BEGIN
 
@@ -170,7 +170,7 @@ REX::W32::ID3D11InputLayout* MaskGeometryPass::get_layout(
     uint32_t stride,
     REX::W32::DXGI_FORMAT position_format,
     uint32_t position_offset,
-    MaskSkinLayout const* skin_layout)
+    SkinLayout const* skin_layout)
 {
     // Position format/offset: the static path passes a calibration result (UNKNOWN means derive
     // from desc); the skinned path passes an attribute-offset spacing result (never UNKNOWN).
@@ -185,7 +185,7 @@ REX::W32::ID3D11InputLayout* MaskGeometryPass::get_layout(
         desc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_POSITION) :
         position_offset;
     // The skinning weight/index layout comes from a calibration result; the static path has none (nullptr).
-    MaskSkinLayout const skin_layout_ref = skin_layout ? *skin_layout : MaskSkinLayout{};
+    SkinLayout const skin_layout_ref = skin_layout ? *skin_layout : SkinLayout{};
     LayoutKey key{
         .skinned = skinned,
         .full_precision = desc.HasFlag(RE::BSGraphics::Vertex::VF_FULLPREC),
@@ -328,28 +328,30 @@ void MaskGeometryPass::release()
     release_layouts();
 }
 
-void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<MaskDraw const> draws)
+void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> draws)
 {
-    for (MaskDraw const& draw : draws)
+    for (RenderGeometry const& draw : draws)
     {
         if (!draw.vertex_buffer || !draw.index_buffer || draw.index_count == 0 || draw.vertex_stride == 0)
             continue;
 
+        bool const skinned = draw.skin ? true : false;
+
         // Skinned draws pass the calibrated layout; static draws pass nullptr (behaviour exactly as before)
         ShaderManager& shaders = ShaderManager::instance();
-        REX::W32::ID3D11InputLayout* layout = get_layout(device, draw.skinned ? shaders.mask_skinned_vs_blob() : shaders.mask_static_vs_blob(),
-            draw.skinned, draw.vertex_desc, draw.vertex_stride,
-            draw.position_format, draw.position_offset, draw.skinned ? &draw.skin_layout : nullptr);
+        REX::W32::ID3D11InputLayout* layout = get_layout(device, skinned ? shaders.mask_skinned_vs_blob() : shaders.mask_static_vs_blob(),
+            skinned, draw.vertex_desc, draw.vertex_stride,
+            draw.position_format, draw.position_offset, skinned ? &draw.skin_layout : nullptr);
         if (!layout)
             continue;
 
-        REX::W32::ID3D11VertexShader* vs = draw.skinned ? m_ref_vs_skinned : m_ref_vs_static;
+        REX::W32::ID3D11VertexShader* vs = skinned ? m_ref_vs_skinned : m_ref_vs_static;
         if (!vs || !m_ref_ps_mask)
             continue;
 
         // b0: static = ViewProj × world transform; palette skinning = ViewProj (the world transform lives in the palette)
         DirectX::XMFLOAT4X4 per_draw = view_proj;
-        if (!draw.skinned)
+        if (!skinned)
         {
             RE::NiTransform const& node_transform = draw.node->world;
             DirectX::XMFLOAT4X4 node_world{};
@@ -374,7 +376,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
         context->Unmap(m_per_draw_cb, 0);
         context->VSSetConstantBuffers(0, 1, &m_per_draw_cb);
 
-        if (draw.skinned)
+        if (skinned)
         {
             RE::NiSkinInstance* skin = draw.skin.get();
 
@@ -387,16 +389,15 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
             // v·StB·BW, namely (StB·BW)ᵀ = BWᵀ·StBᵀ (M_col(X) = X stored as is), so the
             // multiplication order keeps boneWorld first.
             // The palette is built in **global bone index space** (a vertex index is a subscript
-            // into the skin bone array), with P = min(skinData bone count, numMatrices) as its
+            // into the skin bone array), with palette = min(skinData bone count, numMatrices) as its
             // valid length; part.bones is not used (it is partition-local). Unused slots are filled
-            // with a replica of palette[P-1] (to prevent reading undefined content out of bounds)
+            // with a replica of palette[palette-1] (to prevent reading undefined content out of bounds)
             // and the whole block of Max_Palette_Bones matrices is uploaded.
-            uint32_t const palette_count = palette_slot_count(skin);
+            uint32_t const palette_count = std::min(skin->skinData ? skin->skinData->GetBoneCount() : 0u, skin->numMatrices);
             if (palette_count == 0 || palette_count > Max_Palette_Bones)
             {
-                logger::warn("{}", fmt::format("Mask overlay: skip skinned draw [palette slot count out of range] node=\"{}\" {}",
-                    draw.node ? draw.node->name.c_str() : "?",
-                    fmt::format("partition={} P={} budget={}", draw.partition, palette_count, Max_Palette_Bones)));
+                logger::warn("Mask overlay: skip skinned draw [palette slot count out of range] node={} partition={} palette={} budget={}",
+                    draw.node ? draw.node->name.c_str() : "?", draw.partition, palette_count, Max_Palette_Bones);
                 continue;
             }
 
@@ -404,7 +405,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
             bool palette_ok = true;
             for (uint32_t i = 0; i < palette_count; ++i)
             {
-                // i < numMatrices and i < GetBoneCount() are guaranteed by the definition of P (read stays in bounds)
+                // i < numMatrices and i < GetBoneCount() are guaranteed by the definition of palette (read stays in bounds)
                 if (!skin->boneWorldTransforms[i])
                 {
                     palette_ok = false;
@@ -434,9 +435,8 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
             }
             if (!palette_ok)
             {
-                logger::warn("{}", fmt::format("Mask overlay: skip skinned draw [null bone world transform in palette range] node=\"{}\" {}",
-                    draw.node ? draw.node->name.c_str() : "?",
-                    fmt::format("partition={} P={}", draw.partition, palette_count)));
+                logger::warn("Mask overlay: skip skinned draw [null bone world transform in palette range] node={} partition={} palette={}",
+                    draw.node ? draw.node->name.c_str() : "?", draw.partition, palette_count);
                 continue;
             }
             for (size_t k = palette_count; k < Max_Palette_Bones; ++k)
@@ -451,6 +451,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
 
         context->IASetInputLayout(layout);
         context->IASetPrimitiveTopology(REX::W32::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
         uint32_t const stride = draw.vertex_stride;
         uint32_t const offset = 0;
         REX::W32::ID3D11Buffer* vb = draw.vertex_buffer;

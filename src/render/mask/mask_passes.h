@@ -5,9 +5,12 @@
 #pragma once
 
 #include "base/def.h"
+
 #include "mask_glow.h"
 #include "mask_roi.h"
 #include "mask_types.h"
+
+#include "render/geometry/render_geometry.h"
 
 PLUGIN_NAMESPACE_BEGIN
 
@@ -60,7 +63,7 @@ public:
     [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_nearest() const noexcept { return m_depth_nearest; }
 
     // Draw every draw (the palette skinning is built here).
-    void draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<MaskDraw const> draws);
+    void draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> draws);
 private:
     // InputLayout cache key (skinned, precision, attribute offsets, stride)
     struct LayoutKey
@@ -112,7 +115,7 @@ private:
         uint32_t stride,
         REX::W32::DXGI_FORMAT position_format,
         uint32_t position_offset,
-        MaskSkinLayout const* skin_layout);
+        SkinLayout const* skin_layout);
     void release_layouts();
 private:
     REX::W32::ID3D11VertexShader* m_ref_vs_static;

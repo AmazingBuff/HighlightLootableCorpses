@@ -4,36 +4,37 @@
 
 #include "mask_overlay.h"
 
-#include "mask_geometry.h"
 #include "mask_passes.h"
 
 #include "config/config.h"
 #include "render/dx11/common_states.h"
 #include "render/dx11/d3d11_util.h"
 
+#include "render/geometry/render_geometry.h"
+
 MASK_NAMESPACE_BEGIN
 
 namespace
 {
     [[nodiscard]] ROI::Region group_region(
-        std::span<MaskDraw const> group,
+        std::span<RenderGeometry const> group,
         DirectX::XMFLOAT4X4 const& view_proj,
         uint32_t width,
         uint32_t height)
     {
         std::vector<ROI::Sphere> spheres;
         spheres.reserve(group.size());
-        for (MaskDraw const& draw : group)
+        for (RenderGeometry const& draw : group)
         {
             if (!draw.node)
                 return ROI::full_region();
             RE::NiBound const& bound = draw.node->worldBound;
-            spheres.push_back({
-                .center_x = static_cast<double>(bound.center.x),
-                .center_y = static_cast<double>(bound.center.y),
-                .center_z = static_cast<double>(bound.center.z),
-                .radius = static_cast<double>(bound.radius),
-            });
+            spheres.emplace_back(
+                static_cast<double>(bound.center.x),
+                static_cast<double>(bound.center.y),
+                static_cast<double>(bound.center.z),
+                static_cast<double>(bound.radius)
+            );
         }
         return ROI::make_region(spheres, view_proj,
             { static_cast<int32_t>(width), static_cast<int32_t>(height) });
@@ -123,25 +124,28 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
         return;
     }
 
-    std::vector<MaskDraw> draws;
-    collect_mask_draws(targets, draws);
-    if (draws.empty())
-        return;
-
     Config const& cfg = Setting::instance().get_config();
     bool const silhouette = cfg.display_mode == Config::DisplayMode::e_silhouette;
 
     FullscreenPass& consumer = silhouette ? static_cast<FullscreenPass&>(m_silhouette_pass) : static_cast<FullscreenPass&>(m_outline_pass);
     if (!consumer.update_styles(device, context, targets))
     {
-        static bool s_style_failure_logged = false;
-        if (!s_style_failure_logged)
-        {
-            logger::warn("Mask overlay: style table upload failed; frame skipped");
-            s_style_failure_logged = true;
-        }
+        logger::warn("Mask overlay: style table upload failed; frame skipped");
         return;
     }
+
+    std::vector<RE::TESObjectREFR*> objects;
+    objects.reserve(targets.size());
+    for ([[maybe_unused]] const auto& [p_ref, color] : targets)
+    {
+        if (RE::TESObjectREFR* ref = p_ref.get())
+            objects.push_back(ref);
+    }
+
+    std::vector<RenderGeometry> draws;
+    collect_render_geometries(objects, draws);
+    if (draws.empty())
+        return;
 
     D3D11StateCapture capture(context);
     capture.capture();
@@ -168,7 +172,7 @@ void MaskOverlay::end_frame()
 }
 
 void MaskOverlay::draw_silhouette(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context,
-    REX::W32::ID3D11RenderTargetView* overlay_target, std::span<MaskDraw const> group,
+    REX::W32::ID3D11RenderTargetView* overlay_target, std::span<RenderGeometry const> group,
     DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& viewport, CommonStates const& states)
 {
     REX::W32::ID3D11RenderTargetView* mask_rtv = m_mask_rt.rtv();
@@ -191,7 +195,7 @@ void MaskOverlay::draw_silhouette(REX::W32::ID3D11Device* device, REX::W32::ID3D
 }
 
 void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context,
-    REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<MaskDraw> const& draws,
+    REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<RenderGeometry> const& draws,
     DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& vp, CommonStates const& states)
 {
     REX::W32::ID3D11RenderTargetView* mask_rtv = m_mask_rt.rtv();
@@ -207,13 +211,13 @@ void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11D
 
     Glow::KernelProfile const profile = Glow::make_kernel_profile(Setting::instance().get_config().outline_thickness);
     // Collection appends all meshes of a target contiguously, in target order.
-    std::span<MaskDraw const> const all_draws(draws);
+    std::span<RenderGeometry const> const all_draws(draws);
     for (size_t begin = 0; begin < draws.size();)
     {
         size_t end = begin + 1;
         while (end < draws.size() && draws[end].target_index == draws[begin].target_index)
             ++end;
-        std::span<MaskDraw const> const group = all_draws.subspan(begin, end - begin);
+        std::span<RenderGeometry const> const group = all_draws.subspan(begin, end - begin);
         ROI::Region const base_region = group_region(group, view_proj, static_cast<uint32_t>(viewport.width), static_cast<uint32_t>(viewport.height));
         if (base_region.kind == ROI::RegionKind::e_empty)
         {
