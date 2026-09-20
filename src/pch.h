@@ -27,4 +27,4 @@ static constexpr uint32_t Max_Corpse_Count = 32;
 
 #define DLLEXPORT __declspec(dllexport)
 
-#include "Plugin.h"
+#include "plugin.h"

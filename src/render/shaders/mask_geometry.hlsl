@@ -20,8 +20,7 @@ VS_OUT vs_static_main(float3 pos : POSITION)
     return o;
 }
 
-// ---- 蒙皮 VS：VB 自带混合权重/索引，索引指向分区调色板 g_bones ----
-// 槽位数须与 mask_types.h 的 Max_Palette_Bones 一致（128 × 64B = 8KB）。
+// equal to Max_Palette_Bones in mask_types.h
 cbuffer PaletteCB : register(b1)
 {
     row_major float4x4 g_bones[128];

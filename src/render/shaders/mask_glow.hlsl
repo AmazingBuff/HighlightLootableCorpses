@@ -15,6 +15,7 @@ Texture2D<uint> g_mask : register(t0);
 Texture2D<float2> g_horizontal : register(t1);
 StructuredBuffer<float4> g_styles : register(t2);
 
+// equal to Kernel_Slot_Count in mask_glow.h
 cbuffer GlowCB : register(b0)
 {
     float4 g_narrow_weights[16];

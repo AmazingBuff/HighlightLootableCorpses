@@ -6,19 +6,19 @@ project(
 	LANGUAGES CXX
 )
 
+set(PROJECT_NAMESPACE Amazing::${PROJECT_NAME})
+set(PROJECT_AUTHOR AmazingBuff)
+
 option(ENABLE_SKYRIM_SE "Enable support for Skyrim SE in the dynamic runtime feature." ON)
 option(ENABLE_SKYRIM_AE "Enable support for Skyrim AE in the dynamic runtime feature." ON)
 option(ENABLE_SKYRIM_VR "Enable support for Skyrim VR in the dynamic runtime feature." OFF)
 
-list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 include(cmake/packaging.cmake)
 
 file(GLOB_RECURSE SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB_RECURSE HEADER_FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 
-# ---- HLSL 源码嵌入：src/render/shaders/*.hlsl → build/src/render/shader_sources.h ----
-# 着色器以原始字符串常量进入二进制，运行时 D3DCompile 的行为不变；
-# <文件>:<变量名> 的映射显式列出，变量位于 PLUGIN_NAMESPACE::render_shaders。
 set(RENDER_SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders)
 set(RENDER_SHADER_EMBED
     icon_overlay.hlsl:IconOverlay
@@ -44,18 +44,10 @@ add_custom_command(
     COMMENT "Embedding HLSL sources (render/shaders)"
     VERBATIM
 )
-# 生成的头位于构建树，MSBuild 对 include 目录内生成头的依赖扫描不可靠——
-# 显式声明消费它的翻译单元，保证 .hlsl 变更后相关 .cpp 一定重编。
-set_source_files_properties(
-    src/render/mask/mask_passes.cpp
-    src/render/icon/icon_overlay.cpp
-    src/render/shader_manager.cpp
-    PROPERTIES OBJECT_DEPENDS ${GENERATED_SHADER_HEADER}
-)
 
-set(VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/src/Plugin.h)
+set(VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/src/plugin.h)
 configure_file(
-	${CMAKE_CURRENT_SOURCE_DIR}/cmake/Plugin.h.in
+	${CMAKE_CURRENT_SOURCE_DIR}/cmake/plugin.h.in
 	${VERSION_HEADER}
 	@ONLY
 )
