@@ -45,57 +45,6 @@ Works on dead NPCs and creatures, ash piles left behind by reanimated enemies, a
 
 All options live in `Data\SKSE\Plugins\HighlightLootableCorpses.ini` (auto-generated, values below are the defaults). Every option is also editable in the in-game menu.
 
-```ini
-[General]
-; mod enabled on startup
-Enabled=true
-; toggle key virtual-key code (0 = disabled, rebindable in the MCP menu)
-Hotkey=118
-; hotkey behavior: constant (0, toggle on/off) | pulse (1, highlight unsearched corpses then fade out)
-HotkeyMode=0
-; pulse mode: highlight lifetime in milliseconds before fully fading out
-PulseDurationMs=3000
-; corpse scan interval in milliseconds
-ScanIntervalMs=500
-[Display]
-; corpse display style: silhouette (filled mask, 0) | outline (bright core plus outward glow, 1) | icon (distance-scaled arrows above corpses; nearby crowded targets share a double arrow, 2)
-; usually, icon mode has best performance, then silhouette mode, outline is the worst
-DisplayMode=1
-; outline glow size (1-5; larger values widen the bright rim and outer halo)
-OutlineThickness=10
-; icon base half-width in pixels; distance scaling 0.75-1.25, groups 1.2x (maximum 1.5x)
-IconRadius=10
-; outline color (ARGB hex)
-OutlineColor=FF00FF66
-; minimum opacity at max distance
-MinOpacity=0.15
-; search radius in game units (~17 m default)
-MaxDistance=2000.0
-; distance where fading begins (fully opaque below)
-FadeStartDistance=500.0
-; fade curve exponent (higher = faster fade)
-FadePower=2.0
-[LootFilter]
-; stop outlining corpses the player has searched (activated) at least once, even if nothing was taken
-HideSearchedEnabled=true
-; only outline corpses matching the categories below
-ValueFilterEnabled=false
-; quest items
-ValueQuestItems=false
-; keys
-ValueKeys=false
-; enchanted equipment
-ValueEnchanted=false
-; single item worth >= HighValueThreshold gold
-ValueHighValue=false
-; high-value threshold (gold piles count by amount)
-HighValueThreshold=0
-; bit flag, 1 for spell, 2 for skill, 4 for unread, 7 for all
-BookFilterMode=0
-; arrows, ingredients, potions, scrolls, soul gems
-ValueConsumables=false
-```
-
 ## Compatibility
 
 - The loot check reads the same merged inventory the container UI uses (base container + runtime changes), so a corpse is outlined exactly when something is still takeable. Script-added items and player-dropped items in a corpse count as loot, same as vanilla.
@@ -114,8 +63,3 @@ ValueConsumables=false
 - [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG) by alandtse & contributors
 - [SKSE](https://skse.silverlock.org/) by the SKSE team
 - [SKSE Menu Framework](https://github.com/QTR-Modding/SKSE-Menu-Framework-3) & [SKSE-MCP](https://github.com/QTR-Modding/SKSE-MCP)
-## Feature documentation
-
-See the [feature index](docs/features/README.md) and [mask rendering](docs/features/mask-rendering.md) for mode semantics, per-target colors, dual-pass glow resources, conservative local regions, lifetime and validation.
-
-See [Icon rendering](docs/features/icon-rendering.md) for thresholds, stable grouping, top anchors and verification. Groups receive a 1.2x size multiplier, capped at 1.5x base size. All candidates participate before selecting the nearest 16 groups. World and height limits prevent unrelated aligned targets from merging, so some screen overlap remains possible. Thresholds need in-game tuning; synthetic WARP checks are not game validation.
