@@ -87,88 +87,87 @@ namespace
 }
 
 // fork from QuickLoot IE src/items/inventory.cpp
-RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESObjectREFR* a_ref, std::function<bool(RE::TESBoundObject&)> const& filter)
-{
-        RE::InventoryChanges* const changes = a_ref->GetInventoryChanges();
+RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESObjectREFR* a_ref, std::function<bool(RE::TESBoundObject&)> const& filter) const {
+    RE::InventoryChanges* const changes = a_ref->GetInventoryChanges();
 
-        if (RE::Actor* const actor = a_ref->As<RE::Actor>())
+    if (RE::Actor* const actor = a_ref->As<RE::Actor>())
+    {
+        if (changes)
+            m_refresh_enchanted_weapons(actor, changes);
+    }
+
+    std::unordered_map<RE::TESBoundObject*, RE::InventoryEntryData> lookup;
+
+    // Changed items
+    if (changes && changes->entryList)
+    {
+        for (RE::InventoryEntryData const* entry : *changes->entryList)
         {
-            if (changes)
-                m_refresh_enchanted_weapons(actor, changes);
-        }
-
-        std::unordered_map<RE::TESBoundObject*, RE::InventoryEntryData> lookup;
-
-        // Changed items
-        if (changes && changes->entryList)
-        {
-            for (RE::InventoryEntryData const* entry : *changes->entryList)
+            if (entry && entry->object && filter(*entry->object))
             {
-                if (entry && entry->object && filter(*entry->object))
-                {
-                    lookup.emplace(entry->object, *entry);
-                }
+                lookup.emplace(entry->object, *entry);
             }
         }
+    }
 
-        // Base container items
-        if (RE::TESContainer const* const container = a_ref->GetContainer())
+    // Base container items
+    if (RE::TESContainer const* const container = a_ref->GetContainer())
+    {
+        container->ForEachContainerObject([&](RE::ContainerObject& entry)
         {
-            container->ForEachContainerObject([&](RE::ContainerObject& entry)
+            RE::TESBoundObject* const object = entry.obj;
+            if (object && filter(*object) && object->GetFormType() != RE::FormType::LeveledItem)
             {
-                RE::TESBoundObject* const object = entry.obj;
-                if (object && filter(*object) && object->GetFormType() != RE::FormType::LeveledItem)
+                if (auto const it = lookup.find(object); it == lookup.end())
+                    lookup.emplace(object, RE::InventoryEntryData{object, entry.count});
+                else
                 {
+                    RE::InventoryEntryData& inventory_entry = it->second;
+                    if (!inventory_entry.IsLeveled())
+                        inventory_entry.countDelta += entry.count;
+                }
+            }
+            return RE::BSContainer::ForEachResult::kContinue;
+        });
+    }
+
+    // Dropped items always appear as separate item stacks because we need to attach the drop ref to them.
+    if (RE::ExtraDroppedItemList* const extra_drops = a_ref->extraList.GetByType<RE::ExtraDroppedItemList>())
+    {
+        for (RE::ObjectRefHandle const& drop_ref_handle : extra_drops->droppedItemList)
+        {
+            RE::NiPointer<RE::TESObjectREFR> const reference = drop_ref_handle.get();
+
+            if (reference && !reference->IsDeleted() && !reference->IsDisabled())
+            {
+                RE::TESBoundObject* const object = reference->GetObjectReference();
+                if (object && filter(*object))
+                {
+                    int32_t const count = reference->extraList.GetCount();
                     if (auto const it = lookup.find(object); it == lookup.end())
-                        lookup.emplace(object, RE::InventoryEntryData{object, entry.count});
+                        lookup.emplace(object, RE::InventoryEntryData{object, count});
                     else
                     {
                         RE::InventoryEntryData& inventory_entry = it->second;
                         if (!inventory_entry.IsLeveled())
-                            inventory_entry.countDelta += entry.count;
-                    }
-                }
-                return RE::BSContainer::ForEachResult::kContinue;
-            });
-        }
-
-        // Dropped items always appear as separate item stacks because we need to attach the drop ref to them.
-        if (RE::ExtraDroppedItemList* const extra_drops = a_ref->extraList.GetByType<RE::ExtraDroppedItemList>())
-        {
-            for (RE::ObjectRefHandle const& drop_ref_handle : extra_drops->droppedItemList)
-            {
-                RE::NiPointer<RE::TESObjectREFR> const reference = drop_ref_handle.get();
-
-                if (reference && !reference->IsDeleted() && !reference->IsDisabled())
-                {
-                    RE::TESBoundObject* const object = reference->GetObjectReference();
-                    if (object && filter(*object))
-                    {
-                        int32_t const count = reference->extraList.GetCount();
-                        if (auto const it = lookup.find(object); it == lookup.end())
-                            lookup.emplace(object, RE::InventoryEntryData{object, count});
-                        else
-                        {
-                            RE::InventoryEntryData& inventory_entry = it->second;
-                            if (!inventory_entry.IsLeveled())
-                                inventory_entry.countDelta += count;
-                        }
+                            inventory_entry.countDelta += count;
                     }
                 }
             }
         }
+    }
 
-        RE::BSTArray<RE::InventoryEntryData> inventory;
-        for (auto const& entry : lookup | std::views::values)
-        {
-            if (entry.countDelta > 0)
-                inventory.emplace_back(entry);
-        }
+    RE::BSTArray<RE::InventoryEntryData> inventory;
+    for (auto const& entry : lookup | std::views::values)
+    {
+        if (entry.countDelta > 0)
+            inventory.emplace_back(entry);
+    }
 
-        return inventory;
+    return inventory;
 }
 
-LootFilter::EvaluateResult LootFilter::evaluate(RE::TESObjectREFR* a_ref)
+LootFilter::EvaluateResult LootFilter::evaluate(RE::TESObjectREFR* a_ref) const
 {
     EvaluateResult result{
         .has_items = false,
