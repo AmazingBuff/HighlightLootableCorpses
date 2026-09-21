@@ -29,10 +29,11 @@ public:
         int32_t best_item_value;
 
         // Mask-path render geometries, collected by CorpseScan::search() on the SKSE main-thread scan
-        // task (empty in icon mode / when disabled - the scan/corpse list itself is not gated).
-        // The render thread culls on anchor/radius, refreshes the style color per frame from
-        // distance + config + pulse, and consumes these geometries positionally. Kept last so the
-        // common (empty) copy for icon/menu consumers costs only the vector header.
+        // task whenever the plugin is enabled (icon mode included, so switching display modes never
+        // shows a gap; empty only while disabled - the corpse list itself is never gated). The render
+        // thread culls on anchor/radius, refreshes the style color per frame from distance + config +
+        // pulse, and consumes these geometries positionally. Kept last so the common (empty while
+        // disabled) copy for icon/menu consumers costs only the vector header.
         std::vector<RenderGeometry> render_geometries;
     };
 

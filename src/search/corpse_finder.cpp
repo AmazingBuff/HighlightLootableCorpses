@@ -475,10 +475,12 @@ void CorpseScan::search()
         return false;
     });
 
-    // Second pass: mask-geometry collection, gated on enabled non-icon modes. The corpse list
-    // itself is never gated (its icon/menu consumers always need it) - when the gate is false
-    // every render_geometries vector stays empty and this is the only skipped work.
-    if (cfg.enabled && cfg.display_mode != Config::DisplayMode::e_icon)
+    // Second pass: mask-geometry collection, gated on enabled only (icon mode collects too, so
+    // switching display modes never shows a gap - the collection cost rides the same scan task
+    // the loot filtering already occupies). The corpse list itself is never gated (its menu
+    // consumers always need it) - when disabled every render_geometries vector stays empty and
+    // this is the only skipped work.
+    if (cfg.enabled)
         collect_render_geometries(found);
 
     {

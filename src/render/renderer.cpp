@@ -127,10 +127,11 @@ namespace
                     // search() always runs: the corpse list has consumers besides the overlay
                     // (the MCP menu reads the snapshot even with rendering disabled). Mask
                     // geometry is collected inside search() as its second pass, gated there on
-                    // enabled non-icon modes; the collection reads the scene graph on this
-                    // thread, serialized with the engine, and re-resolves each ref's current 3D,
-                    // so corpses whose 3D composition changed within the last scan interval
-                    // contribute at most one interval of staleness (acceptable for corpses).
+                    // enabled only (icon mode collects too); the collection reads the scene
+                    // graph on this thread, serialized with the engine, and re-resolves each
+                    // ref's current 3D, so corpses whose 3D composition changed within the last
+                    // scan interval contribute at most one interval of staleness (acceptable
+                    // for corpses).
                     CorpseScan::instance().search();
 
                     m_scan_in_flight.store(false);
