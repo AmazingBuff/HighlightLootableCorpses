@@ -15,9 +15,9 @@ PLUGIN_NAMESPACE_BEGIN
 
 namespace
 {
-    std::string hotkey_name(uint32_t a_vk)
+    std::string hotkey_name(uint32_t vk)
     {
-        if (a_vk == 0)
+        if (vk == 0)
             return "None";
 
         static constexpr std::string_view s_key_names[] = {
@@ -25,22 +25,22 @@ namespace
             "Shift"sv, "Ctrl"sv, "Alt"sv, "Pause"sv, "Caps"sv, ""sv, ""sv, ""sv, ""sv, ""sv, ""sv, "Esc"sv, ""sv, ""sv, ""sv, ""sv,   // 0x10-0x1F
             "Space"sv, "PgUp"sv, "PgDn"sv, "End"sv, "Home"sv, "Left"sv, "Up"sv, "Right"sv, "Down"sv, ""sv, ""sv, ""sv, ""sv, "Ins"sv, "Del"sv,   // 0x20-0x2E
         };
-        if (a_vk >= 0x08 && a_vk <= 0x2E)
+        if (vk >= 0x08 && vk <= 0x2E)
         {
-            std::string_view const name = s_key_names[a_vk - 0x08];
+            std::string_view const name = s_key_names[vk - 0x08];
             if (!name.empty())
                 return name.data();
         }
-        if (a_vk >= 0x30 && a_vk <= 0x39)
-            return {1, static_cast<char>(a_vk)};                        // 0-9
-        if (a_vk >= 0x41 && a_vk <= 0x5A)
-            return {1, static_cast<char>(a_vk)};                        // A-Z
-        if (a_vk >= 0x60 && a_vk <= 0x69)
-            return fmt::format("Num {}", a_vk - 0x60);                             // numpad 0-9
-        if (a_vk >= 0x70 && a_vk <= 0x87)
-            return fmt::format("F{}", a_vk - 0x6F);                                // F1-F24
+        if (vk >= 0x30 && vk <= 0x39)
+            return {1, static_cast<char>(vk)};                        // 0-9
+        if (vk >= 0x41 && vk <= 0x5A)
+            return {1, static_cast<char>(vk)};                        // A-Z
+        if (vk >= 0x60 && vk <= 0x69)
+            return fmt::format("Num {}", vk - 0x60);                             // numpad 0-9
+        if (vk >= 0x70 && vk <= 0x87)
+            return fmt::format("F{}", vk - 0x6F);                                // F1-F24
 
-        switch (a_vk)
+        switch (vk)
         {
         case 0x01: return "LMB";
         case 0x02: return "RMB";
@@ -48,9 +48,9 @@ namespace
         case 0x05: return "Mouse 4";
         case 0x06: return "Mouse 5";
         default:
-            logger::warn("Unsupported hotkey {}!", a_vk);
+            logger::warn("Unsupported hotkey {}!", vk);
         }
-        return fmt::format("0x{:02X}", a_vk);
+        return fmt::format("0x{:02X}", vk);
     }
 
     // MCP menu callback: runs on the game's main thread (the framework calls it inside an imgui

@@ -23,7 +23,7 @@ public:
     void draw(REX::W32::ID3D11DeviceContext* context, REX::W32::ID3D11RenderTargetView* target, std::vector<IconVertex> const& vertices, CommonStates const& states) const;
     void end_frame();
 private:
-    bool create_pipeline(REX::W32::ID3D11Device* a_device);
+    bool create_pipeline(REX::W32::ID3D11Device* device);
     void release_pipeline();
 private:
     REX::W32::ID3D11VertexShader* m_ref_vertex_shader;

@@ -16,54 +16,54 @@ LootFilter& LootFilter::instance()
 
 namespace
 {
-    [[nodiscard]] int32_t item_value(RE::InventoryEntryData const& a_entry, int32_t a_count)
+    [[nodiscard]] int32_t item_value(RE::InventoryEntryData const& entry, int32_t count)
     {
-        RE::TESBoundObject* const object = a_entry.object;
+        RE::TESBoundObject* const object = entry.object;
         if (!object)
             return 0;
         if (object->IsGold())
-            return a_count;
-        return a_entry.GetValue();
+            return count;
+        return entry.GetValue();
     }
 
-    [[nodiscard]] RE::stl::enumeration<LootFilter::Category> classify_item(RE::InventoryEntryData const& a_entry, int32_t a_count, Config const& a_cfg)
+    [[nodiscard]] RE::stl::enumeration<LootFilter::Category> classify_item(RE::InventoryEntryData const& entry, int32_t count, Config const& cfg)
     {
         RE::stl::enumeration<LootFilter::Category> cats = LootFilter::Category::e_none;
-        RE::TESBoundObject* const object = a_entry.object;
+        RE::TESBoundObject* const object = entry.object;
         if (!object)
             return cats;
 
-        if (a_cfg.value_quest_items && a_entry.IsQuestObject())
+        if (cfg.value_quest_items && entry.IsQuestObject())
             cats |= LootFilter::Category::e_quest;
 
         RE::FormType const type = object->GetFormType();
 
-        if (a_cfg.value_keys && type == RE::FormType::KeyMaster)
+        if (cfg.value_keys && type == RE::FormType::KeyMaster)
             cats |= LootFilter::Category::e_key;
 
-        if (a_cfg.value_enchanted && a_entry.IsEnchanted())
+        if (cfg.value_enchanted && entry.IsEnchanted())
             cats |= LootFilter::Category::e_enchanted;
 
-        if (a_cfg.value_high_value && item_value(a_entry, a_count) >= a_cfg.high_value_threshold)
+        if (cfg.value_high_value && item_value(entry, count) >= cfg.high_value_threshold)
             cats |= LootFilter::Category::e_valuable;
 
-        if (a_cfg.book_filter_mode != Config::BookType::e_none && type == RE::FormType::Book)
+        if (cfg.book_filter_mode != Config::BookType::e_none && type == RE::FormType::Book)
         {
             if (RE::TESObjectBOOK const *const book = object->As<RE::TESObjectBOOK>())
             {
                 bool match = true;
-                if (a_cfg.book_filter_mode & Config::BookType::e_spell)
+                if (cfg.book_filter_mode & Config::BookType::e_spell)
                     match |= book->TeachesSpell();
-                if (a_cfg.book_filter_mode & Config::BookType::e_skill)
+                if (cfg.book_filter_mode & Config::BookType::e_skill)
                     match |= book->TeachesSkill();
-                if (a_cfg.book_filter_mode & Config::BookType::e_not_read)
+                if (cfg.book_filter_mode & Config::BookType::e_not_read)
                     match |= !book->IsRead();
                 if (match)
                     cats |= LootFilter::Category::e_book;
             }
         }
 
-        if (a_cfg.value_consumables)
+        if (cfg.value_consumables)
         {
             bool consumable = false;
             switch (type)
@@ -87,10 +87,10 @@ namespace
 }
 
 // fork from QuickLoot IE src/items/inventory.cpp
-RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESObjectREFR* a_ref, std::function<bool(RE::TESBoundObject&)> const& filter) const {
-    RE::InventoryChanges* const changes = a_ref->GetInventoryChanges();
+RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESObjectREFR* ref, std::function<bool(RE::TESBoundObject&)> const& filter) const {
+    RE::InventoryChanges* const changes = ref->GetInventoryChanges();
 
-    if (RE::Actor* const actor = a_ref->As<RE::Actor>())
+    if (RE::Actor* const actor = ref->As<RE::Actor>())
     {
         if (changes)
             m_refresh_enchanted_weapons(actor, changes);
@@ -111,7 +111,7 @@ RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESOb
     }
 
     // Base container items
-    if (RE::TESContainer const* const container = a_ref->GetContainer())
+    if (RE::TESContainer const* const container = ref->GetContainer())
     {
         container->ForEachContainerObject([&](RE::ContainerObject& entry)
         {
@@ -132,7 +132,7 @@ RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESOb
     }
 
     // Dropped items always appear as separate item stacks because we need to attach the drop ref to them.
-    if (RE::ExtraDroppedItemList* const extra_drops = a_ref->extraList.GetByType<RE::ExtraDroppedItemList>())
+    if (RE::ExtraDroppedItemList* const extra_drops = ref->extraList.GetByType<RE::ExtraDroppedItemList>())
     {
         for (RE::ObjectRefHandle const& drop_ref_handle : extra_drops->droppedItemList)
         {
@@ -167,19 +167,19 @@ RE::BSTArray<RE::InventoryEntryData> LootFilter::fetch_inventory_items(RE::TESOb
     return inventory;
 }
 
-LootFilter::EvaluateResult LootFilter::evaluate(RE::TESObjectREFR* a_ref) const
+LootFilter::EvaluateResult LootFilter::evaluate(RE::TESObjectREFR* ref) const
 {
     EvaluateResult result{
         .has_items = false,
         .categories = Category::e_none,
         .best_item_value = 0
     };
-    if (!a_ref)
+    if (!ref)
         return result;
 
     Config const& cfg = Setting::instance().get_config();
 
-    for (RE::InventoryEntryData const& entry : fetch_inventory_items(a_ref, RE::TESObjectREFR::DEFAULT_INVENTORY_FILTER))
+    for (RE::InventoryEntryData const& entry : fetch_inventory_items(ref, RE::TESObjectREFR::DEFAULT_INVENTORY_FILTER))
     {
         RE::TESBoundObject const* const object = entry.object;
         if (!object)

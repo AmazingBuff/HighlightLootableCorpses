@@ -28,9 +28,9 @@ namespace
         spdlog::set_pattern("%g(%#): [%^%l%$] %v"s);
     }
 
-    void message_handler(SKSE::MessagingInterface::Message* a_msg)
+    void message_handler(SKSE::MessagingInterface::Message* msg)
     {
-        switch (a_msg->type)
+        switch (msg->type)
         {
         case SKSE::MessagingInterface::kDataLoaded:
             (void)PLUGIN_NAMESPACE::QuickLootCompat::install();
@@ -50,14 +50,14 @@ namespace
     }
 }
 
-extern "C" DLLEXPORT bool SKSEPlugin_Load(SKSE::LoadInterface const* a_skse)
+extern "C" DLLEXPORT bool SKSEPlugin_Load(SKSE::LoadInterface const* skse)
 {
     REL::Module::reset();  // Clib-NG bug workaround
 
     initialize_log();
     logger::info("{} v{}"sv, Plugin::Plugin_Name, Plugin::Plugin_Version.string());
 
-    SKSE::Init(a_skse);
+    SKSE::Init(skse);
 
     PLUGIN_NAMESPACE::Setting::instance().load();
     PLUGIN_NAMESPACE::MarkCorpse::instance().install();
@@ -78,10 +78,10 @@ extern "C" DLLEXPORT constinit auto SKSEPlugin_Version = [] {
     return v;
 }();
 
-extern "C" DLLEXPORT bool SKSEPlugin_Query(SKSE::QueryInterface const*, SKSE::PluginInfo* a_info)
+extern "C" DLLEXPORT bool SKSEPlugin_Query(SKSE::QueryInterface const*, SKSE::PluginInfo* info)
 {
-    a_info->infoVersion = SKSE::PluginInfo::kVersion;
-    a_info->name = SKSEPlugin_Version.pluginName;
-    a_info->version = SKSEPlugin_Version.pluginVersion;
+    info->infoVersion = SKSE::PluginInfo::kVersion;
+    info->name = SKSEPlugin_Version.pluginName;
+    info->version = SKSEPlugin_Version.pluginVersion;
     return true;
 }

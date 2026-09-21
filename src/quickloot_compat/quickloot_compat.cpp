@@ -13,22 +13,22 @@ PLUGIN_NAMESPACE_BEGIN
 
 namespace
 {
-    void OnOpeningLootMenu40(QuickLoot::API::OpeningLootMenuEvent* a_event)
+    void OnOpeningLootMenu40(QuickLoot::API::OpeningLootMenuEvent* event)
     {
-        if (!a_event || !a_event->container)
+        if (!event || !event->container)
             return;
 
-        if (RE::NiPointer<RE::TESObjectREFR> const ref = a_event->container.get())
+        if (RE::NiPointer<RE::TESObjectREFR> const ref = event->container.get())
         {
           if (RE::TESObjectREFR* r = ref.get(); Util::is_corpse(r))
                 MarkCorpse::instance().mark(Util::get_container_object(r));
         }
     }
 
-    void OnOpeningLootMenu34(QuickLoot::OpeningLootMenuEvent* a_event)
+    void OnOpeningLootMenu34(QuickLoot::OpeningLootMenuEvent* event)
     {
-        if (a_event && Util::is_corpse(a_event->container))
-            MarkCorpse::instance().mark(Util::get_container_object(a_event->container));
+        if (event && Util::is_corpse(event->container))
+            MarkCorpse::instance().mark(Util::get_container_object(event->container));
     }
 
 

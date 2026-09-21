@@ -57,36 +57,36 @@ ValueConsumables={}
 
 namespace
 {
-    uint32_t parse_hex(char const* a_value, uint32_t a_default) noexcept
+    uint32_t parse_hex(char const* parsed, uint32_t fallback_value) noexcept
     {
-        if (!a_value || !*a_value)
-            return a_default;
+        if (!parsed || !*parsed)
+            return fallback_value;
 
         char* end = nullptr;
-        uint32_t const value = std::strtoul(a_value, &end, 16);
-        return end == a_value ? a_default : value;
+        uint32_t const value = std::strtoul(parsed, &end, 16);
+        return end == parsed ? fallback_value : value;
     }
 
-    void sanitize(Config& a_settings) noexcept
+    void sanitize(Config& settings) noexcept
     {
-        a_settings.hotkey = a_settings.hotkey > 0xFEu ? 0u : a_settings.hotkey;  // 0 = not bound
-        a_settings.hotkey_mode = a_settings.hotkey_mode > Config::HotkeyMode::e_pulse
+        settings.hotkey = settings.hotkey > 0xFEu ? 0u : settings.hotkey;  // 0 = not bound
+        settings.hotkey_mode = settings.hotkey_mode > Config::HotkeyMode::e_pulse
                                      ? Config::HotkeyMode::e_constant
-                                     : a_settings.hotkey_mode;
-        a_settings.pulse_duration_ms = std::clamp(a_settings.pulse_duration_ms, Setting::Min_Pulse_Duration_Ms, Setting::Max_Pulse_Duration_Ms);
-        a_settings.scan_interval_ms = std::clamp(a_settings.scan_interval_ms, Setting::Min_Scan_Interval, Setting::Max_Scan_Interval);
-        a_settings.display_mode = a_settings.display_mode > Config::DisplayMode::e_icon
+                                     : settings.hotkey_mode;
+        settings.pulse_duration_ms = std::clamp(settings.pulse_duration_ms, Setting::Min_Pulse_Duration_Ms, Setting::Max_Pulse_Duration_Ms);
+        settings.scan_interval_ms = std::clamp(settings.scan_interval_ms, Setting::Min_Scan_Interval, Setting::Max_Scan_Interval);
+        settings.display_mode = settings.display_mode > Config::DisplayMode::e_icon
                                       ? Config::DisplayMode::e_outline
-                                      : a_settings.display_mode;
-        a_settings.outline_thickness = std::clamp(a_settings.outline_thickness, Setting::Min_Outline_Thickness, Setting::Max_Outline_Thickness);
-        a_settings.icon_radius = std::clamp(a_settings.icon_radius, Setting::Min_Icon_Radius, Setting::Max_Icon_Radius);
-        a_settings.min_opacity = std::clamp(a_settings.min_opacity, 0.0f, 1.0f);
-        a_settings.max_distance = std::clamp(a_settings.max_distance, Setting::Min_Max_Distance, Setting::Max_Max_Distance);
-        a_settings.fade_start_distance = std::clamp(a_settings.fade_start_distance, 0.0f, a_settings.max_distance);
-        a_settings.fade_power = std::clamp(a_settings.fade_power, Setting::Min_Fade_Power, Setting::Max_Fade_Power);
-        a_settings.high_value_threshold = std::clamp(a_settings.high_value_threshold, Setting::Min_High_Value_Threshold, Setting::Max_High_Value_Threshold);
-        a_settings.book_filter_mode = static_cast<Config::BookType>(
-            std::clamp(a_settings.book_filter_mode.underlying(),
+                                      : settings.display_mode;
+        settings.outline_thickness = std::clamp(settings.outline_thickness, Setting::Min_Outline_Thickness, Setting::Max_Outline_Thickness);
+        settings.icon_radius = std::clamp(settings.icon_radius, Setting::Min_Icon_Radius, Setting::Max_Icon_Radius);
+        settings.min_opacity = std::clamp(settings.min_opacity, 0.0f, 1.0f);
+        settings.max_distance = std::clamp(settings.max_distance, Setting::Min_Max_Distance, Setting::Max_Max_Distance);
+        settings.fade_start_distance = std::clamp(settings.fade_start_distance, 0.0f, settings.max_distance);
+        settings.fade_power = std::clamp(settings.fade_power, Setting::Min_Fade_Power, Setting::Max_Fade_Power);
+        settings.high_value_threshold = std::clamp(settings.high_value_threshold, Setting::Min_High_Value_Threshold, Setting::Max_High_Value_Threshold);
+        settings.book_filter_mode = static_cast<Config::BookType>(
+            std::clamp(settings.book_filter_mode.underlying(),
             static_cast<std::underlying_type_t<Config::BookType>>(Config::BookType::e_none),
             static_cast<std::underlying_type_t<Config::BookType>>(Config::BookType::e_all)));
     }

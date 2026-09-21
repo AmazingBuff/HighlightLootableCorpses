@@ -64,13 +64,13 @@ namespace
     };
 
 
-    [[nodiscard]] std::vector<RE::FormID> resolve_form_ids(std::vector<LocalFromID> const& a_forms)
+    [[nodiscard]] std::vector<RE::FormID> resolve_form_ids(std::vector<LocalFromID> const& forms)
     {
         std::vector<RE::FormID> results;
         if (RE::TESDataHandler* data_handler = RE::TESDataHandler::GetSingleton())
         {
-            results.reserve(a_forms.size());
-            for (auto const& [local_id, plugin_name] : a_forms)
+            results.reserve(forms.size());
+            for (auto const& [local_id, plugin_name] : forms)
             {
                 if (RE::FormID const id = data_handler->LookupFormID(local_id, plugin_name))
                     results.push_back(id);
@@ -78,22 +78,22 @@ namespace
         }
 
         if (results.empty())
-            logger::warn("Resolved 0 of {} static form IDs, related corpse detection is disabled", a_forms.size());
+            logger::warn("Resolved 0 of {} static form IDs, related corpse detection is disabled", forms.size());
 
         return results;
     }
 
-    [[nodiscard]] bool is_ref_form_in(RE::TESObjectREFR const* a_ref, std::vector<RE::FormID> const& a_ids)
+    [[nodiscard]] bool is_ref_form_in(RE::TESObjectREFR const* ref, std::vector<RE::FormID> const& ids)
     {
-        if (!a_ref || a_ids.empty())
+        if (!ref || ids.empty())
             return false;
 
-        RE::TESBoundObject const* base = a_ref->GetBaseObject();
+        RE::TESBoundObject const* base = ref->GetBaseObject();
         if (!base)
             return false;
 
         RE::FormID const id = base->GetFormID();
-        return std::ranges::any_of(a_ids, [id](RE::FormID const& a_form) { return id == a_form; });
+        return std::ranges::any_of(ids, [id](RE::FormID const& form) { return id == form; });
     }
 }
 
@@ -103,49 +103,49 @@ PLUGIN_NAMESPACE_BEGIN
 namespace Util
 {
     // fork from QuickLoot IE
-    RE::TESObjectREFR* get_container_object(RE::TESObjectREFR* a_ref)
+    RE::TESObjectREFR* get_container_object(RE::TESObjectREFR* ref)
     {
-        if (a_ref)
+        if (ref)
         {
-            RE::TESBoundObject const* object = a_ref->GetObjectReference();
+            RE::TESBoundObject const* object = ref->GetObjectReference();
 
             // For enemies that leave behind an ash pile on death
             if (object->Is(RE::FormType::Activator))
             {
-                RE::ObjectRefHandle ref_handle = a_ref->extraList.GetAshPileRef();
+                RE::ObjectRefHandle ref_handle = ref->extraList.GetAshPileRef();
                 if (RE::TESObjectREFRPtr const ptr = ref_handle.get())
                     return get_container_object(ptr.get());
             }
 
-            if (a_ref->HasContainer())
-                return a_ref;
+            if (ref->HasContainer())
+                return ref;
         }
 
         return nullptr;
     }
 
-    bool is_corpse_actor(RE::Actor* a_actor)
+    bool is_corpse_actor(RE::Actor* actor)
     {
-        return a_actor->AsActorState()->GetLifeState() == RE::ACTOR_LIFE_STATE::kDead;
+        return actor->AsActorState()->GetLifeState() == RE::ACTOR_LIFE_STATE::kDead;
     }
 
-    bool is_ash_pile(RE::TESObjectREFR const* a_ref)
+    bool is_ash_pile(RE::TESObjectREFR const* ref)
     {
         static std::vector<RE::FormID> const s_ash_pile_ids = resolve_form_ids(Ash_Piles);
-        return is_ref_form_in(a_ref, s_ash_pile_ids);
+        return is_ref_form_in(ref, s_ash_pile_ids);
     }
 
-    bool is_corpse_object(RE::TESObjectREFR const* a_ref)
+    bool is_corpse_object(RE::TESObjectREFR const* ref)
     {
         static std::vector<RE::FormID> const s_static_corpses_ids = resolve_form_ids(Static_Corpses);
-        return is_ref_form_in(a_ref, s_static_corpses_ids);
+        return is_ref_form_in(ref, s_static_corpses_ids);
     }
 
-    bool is_corpse(RE::TESObjectREFR* a_ref)
+    bool is_corpse(RE::TESObjectREFR* ref)
     {
-        if (RE::Actor* const actor = a_ref->As<RE::Actor>())
+        if (RE::Actor* const actor = ref->As<RE::Actor>())
             return is_corpse_actor(actor);
-        return is_ash_pile(a_ref) || is_corpse_object(a_ref);
+        return is_ash_pile(ref) || is_corpse_object(ref);
     }
 }
 
