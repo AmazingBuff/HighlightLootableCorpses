@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Collect corpse highlight geometry on the scan thread at the configured scan interval instead of every frame, removing the per-frame scene-graph traversal and mesh-validation cost from rendering.
+
 - Restrict outline glow geometry and Gaussian passes to conservative projected target regions, clear the integer mask once per outline frame, and fall back to the full viewport when bounds are unavailable or unsafe.
 
 - Replace hard outline bands with bright narrow cores and diffuse outward Gaussian halos while retaining independent target colors, fade and pulse alpha.

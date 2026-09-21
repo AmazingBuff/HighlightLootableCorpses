@@ -139,7 +139,7 @@ public:
     virtual ~FullscreenPass();
     FullscreenPass(FullscreenPass const&) = delete;
     FullscreenPass& operator=(FullscreenPass const&) = delete;
-    bool update_styles(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, std::span<MaskTarget const> targets);
+    bool update_styles(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, std::span<DirectX::XMFLOAT4 const> colors);
 
     virtual bool init([[maybe_unused]] REX::W32::ID3D11Device* device);
     virtual void release();

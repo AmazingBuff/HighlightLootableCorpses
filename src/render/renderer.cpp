@@ -120,12 +120,19 @@ namespace
         {
             std::chrono::steady_clock::time_point const now = std::chrono::steady_clock::now();
             if (now - m_last_scan >= std::chrono::milliseconds(Setting::instance().get_config().scan_interval_ms) &&
-                !m_scan_in_flight.exchange(true))
-            {
+                !m_scan_in_flight.exchange(true)) {
                 m_last_scan = now;
                 SKSE::GetTaskInterface()->AddTask([this]
                 {
+                    // search() always runs: the corpse list has consumers besides the overlay
+                    // (the MCP menu reads the snapshot even with rendering disabled). Mask
+                    // geometry is collected inside search() as its second pass, gated there on
+                    // enabled non-icon modes; the collection reads the scene graph on this
+                    // thread, serialized with the engine, and re-resolves each ref's current 3D,
+                    // so corpses whose 3D composition changed within the last scan interval
+                    // contribute at most one interval of staleness (acceptable for corpses).
                     CorpseScan::instance().search();
+
                     m_scan_in_flight.store(false);
                 });
             }
@@ -150,6 +157,10 @@ namespace
             if (w <= 0 || h <= 0)
                 return;
 
+            std::vector<CorpseScan::CorpseInfo> corpses = CorpseScan::instance().snapshot();
+            if (corpses.empty())
+                return;
+
             Config const& cfg = Setting::instance().get_config();
             bool const pulse_mode = cfg.hotkey_mode == Config::HotkeyMode::e_pulse;
             bool const pulse_active = pulse_mode && cfg.enabled && PulseTimer::instance().active();
@@ -158,37 +169,17 @@ namespace
 
             if (pulse_active || cfg.enabled)
             {
-                std::vector<CorpseScan::CorpseInfo> corpses = CorpseScan::instance().snapshot();
                 float const pulse = pulse_active ? pulse_alpha(PulseTimer::instance().progress()) : 1.0f;
-                if (pulse > 0.f && !corpses.empty())
-                {
-                    RE::NiCamera* camera = RE::Main::WorldRootCamera();
+                Color color;
+                color.decode(cfg.outline_color);
+                RE::NiCamera* camera = RE::Main::WorldRootCamera();
 
-                    // ---- CPU-side frustum culling: the range scan (max_distance) ignores direction
-                    // while the camera frustum only covers the screen direction; the overlay of a
-                    // corpse outside the view is invisible anyway (mask geometry is clipped by the
-                    // GPU and the icon's world_to_screen rejects it), so discarding it early saves
-                    // this frame's 3D traversal, layout calibration and all the draws. The
-                    // intersection test uses the engine's own NiCamera::PointInFrustum - a bounding
-                    // sphere (anchor + radius, produced during the scan from collision boxes or the
-                    // geometry fallback) intersecting the frustum counts as visible, the same
-                    // semantics as the engine's own culling; the mask does not change the scene, so
-                    // this culling is purely a performance optimization.
-                    // When the camera is missing (main-menu state, for example) culling is skipped
-                    // and the existing behaviour is kept. ----
-                    if (camera && cfg.display_mode != Config::DisplayMode::e_icon)
-                    {
-                        std::erase_if(corpses, [camera](CorpseScan::CorpseInfo const& corpse) {
-                            return !camera->PointInFrustum(corpse.anchor, corpse.radius);
-                        });
-                    }
-
-                    RE::BSGraphics::ViewData const* view_data = update_view_data(camera);
-
-                    Color color;
-                    color.decode(cfg.outline_color);
+                if (pulse > 0.f) {
                     if (cfg.display_mode == Config::DisplayMode::e_icon)
                     {
+
+                        RE::BSGraphics::ViewData const* view_data = update_view_data(camera);
+
                         m_icon_overlay.begin_frame(w, h);
 
                         std::vector<Icon::IconCandidate> candidates;
@@ -214,6 +205,7 @@ namespace
                         }
                         m_icon_overlay.draw(context, m_render_target, vertices, *m_states);
                         m_icon_overlay.end_frame();
+
                     }
                     else
                     {
@@ -223,18 +215,35 @@ namespace
                             return;
                         }
 
-                        std::vector<Mask::MaskTarget> mask_targets;
-                        mask_targets.reserve(corpses.size());
-                        for (CorpseScan::CorpseInfo const& corpse : corpses)
+                        size_t geometry_count = 0;
+                        for (CorpseScan::CorpseInfo& corpse : corpses)
                         {
-                            if (RE::TESForm* form = RE::TESForm::LookupByID(corpse.form_id))
-                            {
-                                if (RE::TESObjectREFR* ref = form->AsReference())
-                                    mask_targets.emplace_back(RE::NiPointer<RE::TESObjectREFR>(ref), DirectX::XMFLOAT4{ color.r(), color.g(), color.b(), pulse * corpse_alpha(cfg, corpse.distance, color.a())});
-                            }
+                            if (corpse.draws.empty())
+                                continue;
+                            geometry_count += corpse.draws.size();
                         }
 
-                        m_mask_overlay.draw(device, context, camera, m_render_target, desc.width, desc.height, mask_targets, *m_states);
+                        std::vector<DirectX::XMFLOAT4> colors;
+                        colors.reserve(corpses.size());
+                        std::vector<RenderGeometry> render_geometries;
+                        render_geometries.reserve(geometry_count);
+
+                        uint32_t visible_index = 0;
+                        for (CorpseScan::CorpseInfo& corpse : corpses)
+                        {
+                            if (corpse.draws.empty())
+                                continue;
+                            for (RenderGeometry& draw : corpse.draws)
+                            {
+                                draw.target_index = visible_index;
+                                render_geometries.push_back(std::move(draw));
+                            }
+                            colors.emplace_back(color.r(), color.g(), color.b(), pulse * corpse_alpha(cfg, corpse.distance, color.a()));
+                            ++visible_index;
+                        }
+
+                        if (!render_geometries.empty())
+                            m_mask_overlay.draw(device, context, camera, m_render_target, desc.width, desc.height, colors, render_geometries, *m_states);
                         m_mask_overlay.end_frame();
                     }
                 }

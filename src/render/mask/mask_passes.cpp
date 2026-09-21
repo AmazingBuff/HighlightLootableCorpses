@@ -506,9 +506,9 @@ void FullscreenPass::release()
     m_ref_vertex_shader = nullptr;
 }
 
-bool FullscreenPass::update_styles(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, std::span<MaskTarget const> targets)
+bool FullscreenPass::update_styles(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, std::span<DirectX::XMFLOAT4 const> colors)
 {
-    if (targets.size() > m_style_capacity)
+    if (colors.size() > m_style_capacity)
     {
         if (m_style_srv)
             m_style_srv->Release();
@@ -519,7 +519,7 @@ bool FullscreenPass::update_styles(REX::W32::ID3D11Device* device, REX::W32::ID3
         m_style_capacity = 0;
 
         REX::W32::D3D11_BUFFER_DESC desc{};
-        desc.byteWidth = static_cast<uint32_t>(targets.size() * sizeof(DirectX::XMFLOAT4));
+        desc.byteWidth = static_cast<uint32_t>(colors.size() * sizeof(DirectX::XMFLOAT4));
         desc.usage = REX::W32::D3D11_USAGE_DEFAULT;
         desc.bindFlags = REX::W32::D3D11_BIND_SHADER_RESOURCE;
         desc.miscFlags = REX::W32::D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
@@ -529,19 +529,16 @@ bool FullscreenPass::update_styles(REX::W32::ID3D11Device* device, REX::W32::ID3
 
         REX::W32::D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
         srv.viewDimension = REX::W32::D3D11_SRV_DIMENSION_BUFFER;
-        srv.buffer.numElements = static_cast<uint32_t>(targets.size());
+        srv.buffer.numElements = static_cast<uint32_t>(colors.size());
         if (!REX::W32::SUCCESS(device->CreateShaderResourceView(m_style_buffer, &srv, &m_style_srv)))
             return false;
-        m_style_capacity = targets.size();
+        m_style_capacity = colors.size();
     }
 
-    std::vector<DirectX::XMFLOAT4> styles;
-    styles.reserve(targets.size());
-    for (const auto& [ref, color] : targets)
-        styles.push_back(color);
-
-    REX::W32::D3D11_BOX const box{ 0, 0, 0, static_cast<uint32_t>(styles.size() * sizeof(DirectX::XMFLOAT4)), 1, 1 };
-    context->UpdateSubresource(m_style_buffer, 0, &box, styles.data(), 0, 0);
+    // The style table is one float4 per target in target order: the geometry pass writes
+    // object_id = target_index + 1 and the shaders read styles[object_id - 1].
+    REX::W32::D3D11_BOX const box{ 0, 0, 0, static_cast<uint32_t>(colors.size() * sizeof(DirectX::XMFLOAT4)), 1, 1 };
+    context->UpdateSubresource(m_style_buffer, 0, &box, colors.data(), 0, 0);
 
     return REX::W32::SUCCESS(device->GetDeviceRemovedReason());
 }

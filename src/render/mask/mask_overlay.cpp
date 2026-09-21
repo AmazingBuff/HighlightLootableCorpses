@@ -109,7 +109,8 @@ bool MaskOverlay::begin_frame(REX::W32::ID3D11Device* device, uint32_t width, ui
 }
 
 void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, RE::NiCamera* camera,
-    REX::W32::ID3D11RenderTargetView* overlay_target, uint32_t width, uint32_t height, std::vector<MaskTarget> const& targets, CommonStates const& states)
+    REX::W32::ID3D11RenderTargetView* overlay_target, uint32_t width, uint32_t height, std::vector<DirectX::XMFLOAT4> const& colors,
+    std::vector<RenderGeometry> const& draws, CommonStates const& states)
 {
     DirectX::XMFLOAT4X4 view_proj{};
     float const (&world_to_cam)[4][4] = camera->GetRuntimeData().worldToCam;
@@ -128,24 +129,11 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
     bool const silhouette = cfg.display_mode == Config::DisplayMode::e_silhouette;
 
     FullscreenPass& consumer = silhouette ? static_cast<FullscreenPass&>(m_silhouette_pass) : static_cast<FullscreenPass&>(m_outline_pass);
-    if (!consumer.update_styles(device, context, targets))
+    if (!consumer.update_styles(device, context, colors))
     {
         logger::warn("Mask overlay: style table upload failed; frame skipped");
         return;
     }
-
-    std::vector<RE::TESObjectREFR*> objects;
-    objects.reserve(targets.size());
-    for ([[maybe_unused]] const auto& [p_ref, color] : targets)
-    {
-        if (RE::TESObjectREFR* ref = p_ref.get())
-            objects.push_back(ref);
-    }
-
-    std::vector<RenderGeometry> draws;
-    collect_render_geometries(objects, draws);
-    if (draws.empty())
-        return;
 
     D3D11StateCapture capture(context);
     capture.capture();
@@ -210,7 +198,7 @@ void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11D
     };
 
     Glow::KernelProfile const profile = Glow::make_kernel_profile(Setting::instance().get_config().outline_thickness);
-    // Collection appends all meshes of a target contiguously, in target order.
+    // The caller appends all draws of a target contiguously, in visible-target order.
     std::span<RenderGeometry const> const all_draws(draws);
     for (size_t begin = 0; begin < draws.size();)
     {

@@ -12,11 +12,4 @@ MASK_NAMESPACE_BEGIN
 // mask RT clear color
 inline constexpr float Mask_Clear_Color[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 
-// mask render target (a reference plus a distance-faded opacity, ordered by target number, i.e. the corpse index)
-struct MaskTarget
-{
-    RE::NiPointer<RE::TESObjectREFR> ref;
-    DirectX::XMFLOAT4 color;
-};
-
 MASK_NAMESPACE_END

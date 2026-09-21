@@ -21,13 +21,19 @@ public:
     bool begin_frame(REX::W32::ID3D11Device* device, uint32_t width, uint32_t height);
 
 
-    // Called from the Present callback: collect the geometry visible from camera and render the
-    // mask, then blend the fill/outline onto overlay_target according to the current display_mode
+    // Called from the Present callback: render the mask for the pre-collected geometry draws and
+    // blend the fill/outline onto overlay_target according to the current display_mode
     // - the caller must pass the RTV of the back buffer Present will show (the contract matches the
     // icon path and does not rely on whichever render target happens to be bound at the engine's
     // Present moment).
     // width/height are the back-buffer dimensions (the mask RT has the same size and is
     // recreated when they change).
+    // draws is the geometry cache snapshot for this frame: collected by the SKSE scan task and
+    // frustum-culled/compacted by the caller (target_index is the compacted visible-entry index,
+    // matching the slot order of colors); this function never walks the scene graph - it reads
+    // only per-frame state (world transforms, skin palettes, worldBound) and issues the draws.
+    // colors is the matching per-target style table (same order as the compacted entries);
+    // an empty list draws nothing.
     void draw(
         REX::W32::ID3D11Device* device,
         REX::W32::ID3D11DeviceContext* context,
@@ -35,7 +41,8 @@ public:
         REX::W32::ID3D11RenderTargetView* overlay_target,
         uint32_t width,
         uint32_t height,
-        std::vector<MaskTarget> const& targets,
+        std::vector<DirectX::XMFLOAT4> const& colors,
+        std::vector<RenderGeometry> const& draws,
         CommonStates const& states);
 
     void end_frame();

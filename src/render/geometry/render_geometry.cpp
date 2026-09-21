@@ -12,8 +12,6 @@ namespace
     constexpr float Max_Part_World_Radius = 1024.0f;  // upper bound on the world bounding-sphere radius (game units)
     constexpr float Ref_Proximity_Slack = 256.0f;     // minimum neighbourhood of the draw footprint around the target ref position (game units)
 
-    constexpr size_t Max_Draws_Per_Frame = 256;
-
     constexpr size_t Max_Position_Calibrations = 256;   // calibration cache cap (past it, no caching on the degraded path)
     constexpr uint32_t Calibration_Sample_Limit = 256;  // sampling cap for large meshes
 
@@ -801,8 +799,6 @@ namespace
         RE::FormID form_id;
         // The target 3D contains skinned geometry → its non-skinned geometry (icicles and similar decoration) is not drawn.
         bool has_skinned;
-        // Integral target index; zero-based until the geometry shader upload.
-        uint32_t target_index;
     };
 
     void collect_static(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, TargetContext const& target, std::vector<RenderGeometry>& draws)
@@ -947,11 +943,10 @@ namespace
         draw.index_count = static_cast<uint32_t>(tri_rt.triangleCount) * 3u;
         draw.position_format = calibration.format;
         draw.position_offset = calibration.offset;
-        draw.target_index = target.target_index;
         draws.push_back(std::move(draw));
     }
 
-    void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, TargetContext const& target, std::vector<RenderGeometry>& draws)
+    void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, std::vector<RenderGeometry>& draws)
     {
         char const* const node_name = geom->name.c_str();
         char const* const rtti_name = geom->GetRTTI() ? geom->GetRTTI()->GetName() : "?";
@@ -1151,7 +1146,6 @@ namespace
             draw.position_format = calibration.position_format;
             draw.position_offset = calibration.position_offset;
             draw.skin_layout = calibration.skin;
-            draw.target_index = target.target_index;
             draws.push_back(std::move(draw));
         }
     }
@@ -1183,51 +1177,42 @@ namespace
         }
 
         if (geom_rt.skinInstance)
-            collect_skinned(geom, geom_rt, target, draws);
+            collect_skinned(geom, geom_rt, draws);
         else
             collect_static(geom, geom_rt, target, draws);
     }
 }
 
-void collect_render_geometries(std::vector<RE::TESObjectREFR*> const& targets, std::vector<RenderGeometry>& draws)
-{
-    for (size_t ti = 0; ti < targets.size(); ++ti)
+void collect_render_geometries(RE::TESObjectREFR const* ref, std::vector<RenderGeometry>& render_geometries) {
+    if (!ref)
+        return;
+
+    RE::NiAVObject* root = ref->GetCurrent3D();
+    if (!root)
+        return;
+
+    bool has_skinned = false;
+    RE::BSVisit::TraverseScenegraphGeometries(root, [&](RE::BSGeometry* geom)
     {
-        RE::TESObjectREFR const* ref = targets[ti];
-        if (!ref)
-            continue;
+        if (geom->GetGeometryRuntimeData().skinInstance)
+        {
+            has_skinned = true;
+            return RE::BSVisit::BSVisitControl::kStop;
+        }
+        return RE::BSVisit::BSVisitControl::kContinue;
+    });
 
-        RE::NiAVObject* root = ref->GetCurrent3D();
-        if (!root)
-            continue;
+    TargetContext const target_ctx{
+        .position = ref->GetPosition(),
+        .form_id = ref->GetFormID(),
+        .has_skinned = has_skinned,
+    };
 
-        bool has_skinned = false;
-        RE::BSVisit::TraverseScenegraphGeometries(root, [&](RE::BSGeometry* geom) {
-            if (geom->GetGeometryRuntimeData().skinInstance)
-            {
-                has_skinned = true;
-                return RE::BSVisit::BSVisitControl::kStop;
-            }
-            return RE::BSVisit::BSVisitControl::kContinue;
-        });
-
-        TargetContext const target_ctx{
-            .position = ref->GetPosition(),
-            .form_id = ref->GetFormID(),
-            .has_skinned = has_skinned,
-            .target_index = static_cast<uint32_t>(ti)
-        };
-
-        RE::BSVisit::TraverseScenegraphGeometries(root, [&](RE::BSGeometry* geom) {
-            if (draws.size() >= Max_Draws_Per_Frame)
-            {
-                logger::warn("Mask overlay: draw cap {} reached, extra geometry dropped", Max_Draws_Per_Frame);
-                return RE::BSVisit::BSVisitControl::kStop;
-            }
-            collect_geometry(geom, target_ctx, draws);
-            return RE::BSVisit::BSVisitControl::kContinue;
-        });
-    }
+    RE::BSVisit::TraverseScenegraphGeometries(root, [&](RE::BSGeometry* geom)
+    {
+        collect_geometry(geom, target_ctx, render_geometries);
+        return RE::BSVisit::BSVisitControl::kContinue;
+    });
 }
 
 PLUGIN_NAMESPACE_END

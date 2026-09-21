@@ -36,37 +36,12 @@ namespace
     [[nodiscard]] float hk_y(RE::hkVector4 const& v) { return v.quad.m128_f32[1]; }
     [[nodiscard]] float hk_z(RE::hkVector4 const& v) { return v.quad.m128_f32[2]; }
 
-    [[nodiscard]] RE::NiPoint3 hk_to_ni(RE::hkVector4 const& v)
-    {
-        return { hk_x(v), hk_y(v), hk_z(v) };
-    }
-
     // Havok world scale inverse: metres → game units (engine global, the same address as Precision)
     [[nodiscard]] float world_scale_inverse()
     {
         static REL::Relocation<float*> s_world_scale_inverse{ RELOCATION_ID(230692, 187407) };
         float* scale = s_world_scale_inverse.get();
         return scale ? *scale : 70.0f;
-    }
-
-    // Havok world transform (hkTransform, metres) → NiTransform (game units)
-    [[nodiscard]] RE::NiTransform hk_transform_to_ni(RE::hkTransform const& t)
-    {
-        RE::NiTransform out;
-        out.scale = 1.0f;
-        RE::hkRotation const& r = t.rotation;
-        out.rotate.entry[0][0] = hk_x(r.col0);
-        out.rotate.entry[0][1] = hk_x(r.col1);
-        out.rotate.entry[0][2] = hk_x(r.col2);
-        out.rotate.entry[1][0] = hk_y(r.col0);
-        out.rotate.entry[1][1] = hk_y(r.col1);
-        out.rotate.entry[1][2] = hk_y(r.col2);
-        out.rotate.entry[2][0] = hk_z(r.col0);
-        out.rotate.entry[2][1] = hk_z(r.col1);
-        out.rotate.entry[2][2] = hk_z(r.col2);
-        float const s = world_scale_inverse();
-        out.translate = { hk_x(t.translation) * s, hk_y(t.translation) * s, hk_z(t.translation) * s };
-        return out;
     }
 
     void expand_aabb(RE::NiPoint3& min, RE::NiPoint3& max, RE::NiPoint3 const& p)
@@ -158,13 +133,9 @@ namespace
     }
 
     // Recursively walk the 3D node tree and collect the collision objects that are "in the Havok
-    // world" (ordinary state / ash piles):
-    // - world AABB: collected per rigid body with GetAabbWorldspace, then clustered by
-    //   largest_cluster_bounds;
-    // - OBB: the world 8 corners of the largest box-shaped collision body by volume (usually the
-    //   Actor's root collision box), computed from the shape half extents (metres) and the body's
-    //   world transform.
-    void collect_collision_objects(RE::NiAVObject* object, std::vector<BodyBox>& boxes, RE::NiPoint3* obb_corners, bool& has_obb, float& best_volume)
+    // world" (ordinary state / ash piles): the world AABB of each rigid body comes from
+    // GetAabbWorldspace, then the boxes are clustered by largest_cluster_bounds.
+    void collect_collision_objects(RE::NiAVObject* object, std::vector<BodyBox>& boxes)
     {
         if (!object)
             return;
@@ -179,43 +150,19 @@ namespace
                     {
                         // in the Havok world → the transform is live
                         BodyBox body_box;
-                        if (rigid_body_aabb(body, body_box.min, body_box.max)) 
-                        {
+                        if (rigid_body_aabb(body, body_box.min, body_box.max))
                             boxes.push_back(body_box);
-                            
-                            RE::hkpShape const* shape = rb->GetShape();
-                            if (shape && shape->type == RE::hkpShapeType::kBox)
-                            {
-                                RE::hkpBoxShape const* box = static_cast<RE::hkpBoxShape const*>(shape);
-                                float const s = world_scale_inverse();
-                                RE::NiPoint3 const he = hk_to_ni(box->halfExtents) * s;
-                                float const vol = he.x * he.y * he.z;
-                                if (vol > best_volume)
-                                {
-                                    best_volume = vol;
-                                    RE::NiTransform const world = hk_transform_to_ni(rb->motion.motionState.transform);
-                                    for (int i = 0; i < 8; ++i)
-                                    {
-                                        float const sx = (i & 1) ? he.x : -he.x;
-                                        float const sy = (i & 2) ? he.y : -he.y;
-                                        float const sz = (i & 4) ? he.z : -he.z;
-                                        obb_corners[i] = world * RE::NiPoint3{ sx, sy, sz };
-                                    }
-                                    has_obb = true;
-                                }
-                            }
-                        }
                     }
                 }
             }
         }
-        
+
         if (RE::NiNode* node = object->AsNode())
         {
             for (RE::NiPointer<RE::NiAVObject> const& child : node->children)
             {
                 if (child)
-                    collect_collision_objects(child.get(), boxes, obb_corners, has_obb, best_volume);
+                    collect_collision_objects(child.get(), boxes);
             }
         }
     }
@@ -293,10 +240,8 @@ namespace
     // Combined entry point: ragdoll → the ragdoll rigid bodies; otherwise → the collision objects
     // on the 3D tree; and finally the geometry fallback. Returning true means a valid world AABB
     // was obtained.
-    [[nodiscard]] bool compute_bounds(RE::TESObjectREFR* ref, bool ragdoll, RE::NiPoint3& min, RE::NiPoint3& max, RE::NiPoint3* obb_corners, bool& has_obb, bool& from_collision)
+    [[nodiscard]] bool compute_bounds(RE::TESObjectREFR* ref, bool ragdoll, RE::NiPoint3& min, RE::NiPoint3& max)
     {
-        has_obb = false;
-        from_collision = false;
         if (!ref)
             return false;
 
@@ -315,7 +260,6 @@ namespace
                 {
                     min = mn;
                     max = mx;
-                    from_collision = true;
                     return true;
                 }
             }
@@ -323,16 +267,13 @@ namespace
         else
         {
             std::vector<BodyBox> boxes;
-            float best_vol = 0.0f;
-            collect_collision_objects(node, boxes, obb_corners, has_obb, best_vol);
+            collect_collision_objects(node, boxes);
             if (largest_cluster_bounds(boxes, mn, mx))
             {
                 min = mn;
                 max = mx;
-                from_collision = true;
                 return true;
             }
-            has_obb = false;
         }
 
         expand_geometry_bounds(node, mn, mx);
@@ -376,7 +317,7 @@ namespace
             entry.best_item_value = loot.best_item_value;
 
             RE::NiPoint3 b_min, b_max;
-            if (compute_bounds(actor, actor->IsInRagdollState(), b_min, b_max, entry.obb_corners, entry.has_obb, entry.bounds_from_collision))
+            if (compute_bounds(actor, actor->IsInRagdollState(), b_min, b_max))
             {
                 entry.bound_min = b_min;
                 entry.bound_max = b_max;
@@ -411,8 +352,6 @@ namespace
             entry.radius = 40.0f;
             entry.loot_categories = loot.categories;
             entry.best_item_value = loot.best_item_value;
-            entry.is_ash_pile = is_ash;
-            entry.is_static_corpse = is_corpse_obj;
 
             if (RE::NiAVObject const* object = ref->Get3D())
             {
@@ -424,9 +363,7 @@ namespace
                 }
             }
             RE::NiPoint3 b_min, b_max;
-            bool dummy_obb = false;
-            bool dummy_src = false;
-            if (compute_bounds(ref, false, b_min, b_max, nullptr, dummy_obb, dummy_src))
+            if (compute_bounds(ref, false, b_min, b_max))
             {
                 entry.bound_min = b_min;
                 entry.bound_max = b_max;
@@ -437,6 +374,60 @@ namespace
         corpse_info = entry;
 
         return true;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Mask-geometry collection (second pass of CorpseScan::search)
+    //
+    // Runs on the SKSE main-thread scan task, after the distance sort, so collection reads the
+    // scene graph serialized with the engine and the nearest corpses win the budget. For each
+    // frustum-surviving corpse (bounding-sphere pre-cull, the same test the render-side cull
+    // uses; a missing camera keeps the collect-everything behaviour) one single-target
+    // collect_render_geometries call fills the corpse's draws; the shared budget makes the
+    // per-call cap enforce Max_Draws_Per_Frame across corpses, and the pass stops once
+    // Max_Corpse_Count corpses carry draws (nearest-first truncation, v2 semantics). Corpses
+    // beyond a cap keep empty draws and stay in the list - only their highlights are skipped.
+    // ---------------------------------------------------------------------------
+
+    void collect_render_geometries(std::vector<CorpseScan::CorpseInfo>& corpses)
+    {
+        RE::NiCamera* camera = RE::Main::WorldRootCamera();
+
+        // Reused per corpse: one single-element target list and one draw list, so the pass does
+        // not churn heap allocations per corpse.
+
+        size_t total_draws = 0;
+        size_t corpses_with_draws = 0;
+        for (CorpseScan::CorpseInfo& corpse : corpses)
+        {
+            if (corpses_with_draws >= Max_Corpse_Count)
+            {
+                logger::warn("Mask overlay: corpse cap {} reached, extra targets not drawn", Max_Corpse_Count);
+                break;
+            }
+            if (total_draws >= Max_Draws_Per_Frame)
+            {
+                logger::warn("Mask overlay: draw cap {} reached, extra geometry dropped", Max_Draws_Per_Frame);
+                break;
+            }
+
+            if (camera && !camera->PointInFrustum(corpse.anchor, corpse.radius))
+                continue;
+
+            RE::TESForm* form = RE::TESForm::LookupByID(corpse.form_id);
+            const RE::TESObjectREFR* ref = form ? form->AsReference() : nullptr;
+            if (!ref)
+                continue;
+
+            std::vector<RenderGeometry> corpse_render_geometries;
+            collect_render_geometries(ref, corpse_render_geometries);
+            if (!corpse_render_geometries.empty())
+            {
+                total_draws += corpse_render_geometries.size();
+                ++corpses_with_draws;
+                corpse.draws.swap(corpse_render_geometries);
+            }
+        }
     }
 }
 
@@ -483,6 +474,12 @@ void CorpseScan::search()
             return true;
         return false;
     });
+
+    // Second pass: mask-geometry collection, gated on enabled non-icon modes. The corpse list
+    // itself is never gated (its icon/menu consumers always need it) - when the gate is false
+    // every draws vector stays empty and this is the only skipped work.
+    if (cfg.enabled && cfg.display_mode != Config::DisplayMode::e_icon)
+        collect_render_geometries(found);
 
     {
         std::lock_guard lock(m_mutex);
