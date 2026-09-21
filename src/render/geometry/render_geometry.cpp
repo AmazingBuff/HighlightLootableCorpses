@@ -792,7 +792,7 @@ namespace
     // ---------------------------------------------------------------------------
 
     // Target context needed by the static draw checks: the position and the form id are taken once
-    // per target in collect_draws and reused for every geometry.
+    // per target in collect_geometry and reused for every geometry.
     struct TargetContext
     {
         RE::NiPoint3 position;
@@ -801,7 +801,7 @@ namespace
         bool has_skinned;
     };
 
-    void collect_static(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, TargetContext const& target, std::vector<RenderGeometry>& draws)
+    void collect_static(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, TargetContext const& target, std::vector<RenderGeometry>& render_geometries)
     {
         // The target 3D contains skinned geometry → its static geometry (icicles and similar
         // decoration) is not part of the body silhouette and is not drawn.
@@ -910,7 +910,7 @@ namespace
         if (calibration.state == PositionCalibrationState::e_unresolved)
             return;
 
-        // ---- Ownership check: the mask only draws geometry "at the target" (engine world bounding
+        // ---- Ownership check: the mask only renders geometry "at the target" (engine world bounding
         // sphere, looser than a box test). The per-mesh model AABB only feeds calibration scoring
         // and never enters the cache or this test (to prevent cross-mesh pollution). ----
         float const ref_distance = distance_to_point(target.position, world_center);
@@ -943,10 +943,10 @@ namespace
         draw.index_count = static_cast<uint32_t>(tri_rt.triangleCount) * 3u;
         draw.position_format = calibration.format;
         draw.position_offset = calibration.offset;
-        draws.push_back(std::move(draw));
+        render_geometries.push_back(std::move(draw));
     }
 
-    void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, std::vector<RenderGeometry>& draws)
+    void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, std::vector<RenderGeometry>& render_geometries)
     {
         char const* const node_name = geom->name.c_str();
         char const* const rtti_name = geom->GetRTTI() ? geom->GetRTTI()->GetName() : "?";
@@ -1146,11 +1146,11 @@ namespace
             draw.position_format = calibration.position_format;
             draw.position_offset = calibration.position_offset;
             draw.skin_layout = calibration.skin;
-            draws.push_back(std::move(draw));
+            render_geometries.push_back(std::move(draw));
         }
     }
 
-    void collect_geometry(RE::BSGeometry* geom, TargetContext const& target, std::vector<RenderGeometry>& draws)
+    void collect_geometry(RE::BSGeometry* geom, TargetContext const& target, std::vector<RenderGeometry>& render_geometries)
     {
         switch (geom->GetType().get())
         {
@@ -1177,9 +1177,9 @@ namespace
         }
 
         if (geom_rt.skinInstance)
-            collect_skinned(geom, geom_rt, draws);
+            collect_skinned(geom, geom_rt, render_geometries);
         else
-            collect_static(geom, geom_rt, target, draws);
+            collect_static(geom, geom_rt, target, render_geometries);
     }
 }
 

@@ -328,16 +328,16 @@ void MaskGeometryPass::release()
     release_layouts();
 }
 
-void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> draws)
+void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> render_geometries)
 {
-    for (RenderGeometry const& draw : draws)
+    for (RenderGeometry const& draw : render_geometries)
     {
         if (!draw.vertex_buffer || !draw.index_buffer || draw.index_count == 0 || draw.vertex_stride == 0)
             continue;
 
         bool const skinned = draw.skin ? true : false;
 
-        // Skinned draws pass the calibrated layout; static draws pass nullptr (behaviour exactly as before)
+        // Skinned geometries pass the calibrated layout; static geometries pass nullptr (behaviour exactly as before)
         ShaderManager& shaders = ShaderManager::instance();
         REX::W32::ID3D11InputLayout* layout = get_layout(device, skinned ? shaders.mask_skinned_vs_blob() : shaders.mask_static_vs_blob(),
             skinned, draw.vertex_desc, draw.vertex_stride,

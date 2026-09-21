@@ -215,30 +215,25 @@ namespace
                             return;
                         }
 
-                        size_t geometry_count = 0;
-                        for (CorpseScan::CorpseInfo& corpse : corpses)
-                        {
-                            if (corpse.draws.empty())
-                                continue;
-                            geometry_count += corpse.draws.size();
-                        }
-
+                        // One outer element per visible non-empty corpse (the scan-side frustum
+                        // cull leaves out-of-view corpses with empty geometry): outer index ==
+                        // colors index == target_index, so object_id = target_index + 1 stays
+                        // aligned with the style table. Geometries move out of the local snapshot
+                        // copy after the index rewrite.
                         std::vector<DirectX::XMFLOAT4> colors;
                         colors.reserve(corpses.size());
-                        std::vector<RenderGeometry> render_geometries;
-                        render_geometries.reserve(geometry_count);
+                        std::vector<std::vector<RenderGeometry>> render_geometries;
+                        render_geometries.reserve(corpses.size());
 
                         uint32_t visible_index = 0;
                         for (CorpseScan::CorpseInfo& corpse : corpses)
                         {
-                            if (corpse.draws.empty())
+                            if (corpse.render_geometries.empty())
                                 continue;
-                            for (RenderGeometry& draw : corpse.draws)
-                            {
+                            for (RenderGeometry& draw : corpse.render_geometries)
                                 draw.target_index = visible_index;
-                                render_geometries.push_back(std::move(draw));
-                            }
                             colors.emplace_back(color.r(), color.g(), color.b(), pulse * corpse_alpha(cfg, corpse.distance, color.a()));
+                            render_geometries.push_back(std::move(corpse.render_geometries));
                             ++visible_index;
                         }
 

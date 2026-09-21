@@ -15,10 +15,11 @@ inline constexpr size_t Max_Palette_Bones = 128;
 inline constexpr size_t Palette_CB_Bytes = Max_Palette_Bones * 64;
 static_assert(Palette_CB_Bytes == Max_Palette_Bones * sizeof(float) * 16, "palette CB layout must be float4x4 slots");
 
-// Draw cap for one collection run: past it the traversal stops and extra geometry is dropped
-// with a WARN. CorpseScan::search() collects one corpse per call and passes its remaining
-// cross-corpse budget (down from Max_Draws_Per_Frame) so the per-call cap enforces the global one.
-inline constexpr size_t Max_Draws_Per_Frame = 256;
+// Render-geometry cap for one collection run: past it the traversal stops and extra geometry is
+// dropped with a WARN. CorpseScan::search() collects one corpse per call and passes its remaining
+// cross-corpse budget (down from Max_Render_Geometries_Per_Frame) so the per-call cap enforces the
+// global one.
+inline constexpr size_t Max_Render_Geometries_Per_Frame = 256;
 
 
 // Weight/index layout inside the skinned vertex buffer (self-calibration result)
@@ -49,9 +50,10 @@ struct RenderGeometry
     RE::NiPointer<RE::BSGeometry> node;  // keeps the static-path geometry (and its GPU buffers) alive
 
     // Index of the target in the caller's target list (collection time). The scan-side cache
-    // stores the cache slot index; the render thread compacts frustum-surviving entries
-    // positionally (rewriting target_index on its local snapshot copy) so style indexing and
-    // outline grouping stay per-frame correct without any form-id remap.
+    // keeps the per-corpse slot index (0-based within one corpse); the render thread compacts
+    // frustum-surviving corpses into the per-frame visible-target order, rewriting target_index
+    // to the outer index on its local snapshot copy, so style indexing and outline grouping stay
+    // per-frame correct without any form-id remap.
     uint32_t target_index;
 
     // Position attribute layout: the static path stores the calibrate_position_format result
@@ -60,19 +62,19 @@ struct RenderGeometry
     REX::W32::DXGI_FORMAT position_format;
     uint32_t position_offset;
     uint32_t partition;
-    // Skinning weight/index layout: only skinned draws store a calibration result; static draws keep the default values.
+    // Skinning weight/index layout: only skinned geometries store a calibration result; static geometries keep the default values.
     SkinLayout skin_layout;
 };
 
-// Collect one run's geometry draws from the mask targets along two paths, static (the
+// Collect one run's render geometries from the mask targets along two paths, static (the
 // BSTriShape family) and skinned (NiSkinPartition partitions), including position-format and
-// skin-layout self-calibration and per-mesh validation - draws with no solution are skipped
+// skin-layout self-calibration and per-mesh validation - geometries with no solution are skipped
 // (better to draw too little than to smear garbage over the screen). Runs on the SKSE main-thread
 // scan task (scene-graph reads are serialized with the engine there, same as CorpseScan::search);
 // it must not be called from the Present thread. The order of the target list is the target
-// index; after max_draws draws the traversal stops (extra geometry dropped, WARN). CorpseScan
+// index; after the render-geometry cap the traversal stops (extra geometry dropped, WARN). CorpseScan
 // calls it once per corpse with a single-element target list and a shrinking budget, so the
-// per-call cap doubles as the cross-corpse budget; max_draws clamps to Max_Draws_Per_Frame.
+// per-call cap doubles as the cross-corpse budget; the cap clamps to Max_Render_Geometries_Per_Frame.
 void collect_render_geometries(RE::TESObjectREFR const* ref, std::vector<RenderGeometry>& render_geometries);
 
 PLUGIN_NAMESPACE_END

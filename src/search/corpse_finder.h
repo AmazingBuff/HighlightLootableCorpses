@@ -28,12 +28,12 @@ public:
         RE::stl::enumeration<LootFilter::Category> loot_categories;
         int32_t best_item_value;
 
-        // Mask-path geometry draws, collected by CorpseScan::search() on the SKSE main-thread scan
+        // Mask-path render geometries, collected by CorpseScan::search() on the SKSE main-thread scan
         // task (empty in icon mode / when disabled - the scan/corpse list itself is not gated).
         // The render thread culls on anchor/radius, refreshes the style color per frame from
-        // distance + config + pulse, and consumes these draws positionally. Kept last so the
+        // distance + config + pulse, and consumes these geometries positionally. Kept last so the
         // common (empty) copy for icon/menu consumers costs only the vector header.
-        std::vector<RenderGeometry> draws;
+        std::vector<RenderGeometry> render_geometries;
     };
 
     void search();

@@ -383,20 +383,20 @@ namespace
     // scene graph serialized with the engine and the nearest corpses win the budget. For each
     // frustum-surviving corpse (bounding-sphere pre-cull, the same test the render-side cull
     // uses; a missing camera keeps the collect-everything behaviour) one single-target
-    // collect_render_geometries call fills the corpse's draws; the shared budget makes the
-    // per-call cap enforce Max_Draws_Per_Frame across corpses, and the pass stops once
-    // Max_Corpse_Count corpses carry draws (nearest-first truncation, v2 semantics). Corpses
-    // beyond a cap keep empty draws and stay in the list - only their highlights are skipped.
+    // collect_render_geometries call fills the corpse's render_geometries; the shared budget makes the
+    // per-call cap enforce Max_Render_Geometries_Per_Frame across corpses, and the pass stops once
+    // Max_Corpse_Count corpses carry render geometries (nearest-first truncation, v2 semantics). Corpses
+    // beyond a cap keep empty render_geometries and stay in the list - only their highlights are skipped.
     // ---------------------------------------------------------------------------
 
     void collect_render_geometries(std::vector<CorpseScan::CorpseInfo>& corpses)
     {
         RE::NiCamera* camera = RE::Main::WorldRootCamera();
 
-        // Reused per corpse: one single-element target list and one draw list, so the pass does
-        // not churn heap allocations per corpse.
+        // Reused per corpse: one single-element target list and one render-geometry list, so the
+        // pass does not churn heap allocations per corpse.
 
-        size_t total_draws = 0;
+        size_t total_render_geometries = 0;
         size_t corpses_with_draws = 0;
         for (CorpseScan::CorpseInfo& corpse : corpses)
         {
@@ -405,9 +405,9 @@ namespace
                 logger::warn("Mask overlay: corpse cap {} reached, extra targets not drawn", Max_Corpse_Count);
                 break;
             }
-            if (total_draws >= Max_Draws_Per_Frame)
+            if (total_render_geometries >= Max_Render_Geometries_Per_Frame)
             {
-                logger::warn("Mask overlay: draw cap {} reached, extra geometry dropped", Max_Draws_Per_Frame);
+                logger::warn("Mask overlay: render-geometry cap {} reached, extra geometry dropped", Max_Render_Geometries_Per_Frame);
                 break;
             }
 
@@ -423,9 +423,9 @@ namespace
             collect_render_geometries(ref, corpse_render_geometries);
             if (!corpse_render_geometries.empty())
             {
-                total_draws += corpse_render_geometries.size();
+                total_render_geometries += corpse_render_geometries.size();
                 ++corpses_with_draws;
-                corpse.draws.swap(corpse_render_geometries);
+                corpse.render_geometries.swap(corpse_render_geometries);
             }
         }
     }
@@ -477,7 +477,7 @@ void CorpseScan::search()
 
     // Second pass: mask-geometry collection, gated on enabled non-icon modes. The corpse list
     // itself is never gated (its icon/menu consumers always need it) - when the gate is false
-    // every draws vector stays empty and this is the only skipped work.
+    // every render_geometries vector stays empty and this is the only skipped work.
     if (cfg.enabled && cfg.display_mode != Config::DisplayMode::e_icon)
         collect_render_geometries(found);
 

@@ -110,8 +110,11 @@ bool MaskOverlay::begin_frame(REX::W32::ID3D11Device* device, uint32_t width, ui
 
 void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, RE::NiCamera* camera,
     REX::W32::ID3D11RenderTargetView* overlay_target, uint32_t width, uint32_t height, std::vector<DirectX::XMFLOAT4> const& colors,
-    std::vector<RenderGeometry> const& draws, CommonStates const& states)
+    std::vector<std::vector<RenderGeometry>> const& render_geometries, CommonStates const& states)
 {
+    if (render_geometries.empty())
+        return;
+
     DirectX::XMFLOAT4X4 view_proj{};
     float const (&world_to_cam)[4][4] = camera->GetRuntimeData().worldToCam;
     for (int row = 0; row < 4; ++row)
@@ -147,9 +150,9 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
     };
 
     if (silhouette)
-        draw_silhouette(device, context, overlay_target, draws, view_proj, viewport, states);
+        draw_silhouette(device, context, overlay_target, render_geometries, view_proj, viewport, states);
     else
-        draw_outline(device, context, overlay_target, draws, view_proj, viewport, states);
+        draw_outline(device, context, overlay_target, render_geometries, view_proj, viewport, states);
     
     capture.restore();
 }
@@ -160,9 +163,19 @@ void MaskOverlay::end_frame()
 }
 
 void MaskOverlay::draw_silhouette(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context,
-    REX::W32::ID3D11RenderTargetView* overlay_target, std::span<RenderGeometry const> group,
+    REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<std::vector<RenderGeometry>> const& render_geometries,
     DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& viewport, CommonStates const& states)
 {
+    // Merge every corpse's group into one flat list: the silhouette renders all targets into a
+    // single private-depth mask with one fullscreen consume, so the grouping carries no semantics.
+    size_t total = 0;
+    for (std::vector<RenderGeometry> const& group : render_geometries)
+        total += group.size();
+    std::vector<RenderGeometry> merged;
+    merged.reserve(total);
+    for (std::vector<RenderGeometry> const& group : render_geometries)
+        merged.insert(merged.end(), group.begin(), group.end());
+
     REX::W32::ID3D11RenderTargetView* mask_rtv = m_mask_rt.rtv();
     context->OMSetRenderTargets(1, &mask_rtv, m_mask_rt.dsv());
     context->ClearRenderTargetView(mask_rtv, Mask_Clear_Color);
@@ -172,7 +185,7 @@ void MaskOverlay::draw_silhouette(REX::W32::ID3D11Device* device, REX::W32::ID3D
     context->OMSetDepthStencilState(m_geometry_pass.depth_nearest(), 0);
     context->RSSetState(states.cull_none());
     context->RSSetViewports(1, &viewport);
-    m_geometry_pass.draw(device, context, view_proj, group);
+    m_geometry_pass.draw(device, context, view_proj, merged);
 
     context->OMSetRenderTargets(1, &overlay_target, nullptr);
     context->OMSetBlendState(states.non_premultiplied(), nullptr, 0xFFFFFFFF);
@@ -183,7 +196,7 @@ void MaskOverlay::draw_silhouette(REX::W32::ID3D11Device* device, REX::W32::ID3D
 }
 
 void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context,
-    REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<RenderGeometry> const& draws,
+    REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<std::vector<RenderGeometry>> const& render_geometries,
     DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& vp, CommonStates const& states)
 {
     REX::W32::ID3D11RenderTargetView* mask_rtv = m_mask_rt.rtv();
@@ -198,27 +211,19 @@ void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11D
     };
 
     Glow::KernelProfile const profile = Glow::make_kernel_profile(Setting::instance().get_config().outline_thickness);
-    // The caller appends all draws of a target contiguously, in visible-target order.
-    std::span<RenderGeometry const> const all_draws(draws);
-    for (size_t begin = 0; begin < draws.size();)
+    // One outer element per visible corpse; target_index of every geometry in a group equals the
+    // group's outer index, so object_id derives from the group's first element as before.
+    for (std::vector<RenderGeometry> const& group : render_geometries)
     {
-        size_t end = begin + 1;
-        while (end < draws.size() && draws[end].target_index == draws[begin].target_index)
-            ++end;
-        std::span<RenderGeometry const> const group = all_draws.subspan(begin, end - begin);
+        if (group.empty())
+            continue;
         ROI::Region const base_region = group_region(group, view_proj, static_cast<uint32_t>(viewport.width), static_cast<uint32_t>(viewport.height));
         if (base_region.kind == ROI::RegionKind::e_empty)
-        {
-            begin = end;
             continue;
-        }
         ROI::Region const horizontal_region = ROI::expand(base_region, profile.radius, true, false, viewport);
         ROI::Region const vertical_region = ROI::expand(base_region, profile.radius, true, true, viewport);
         if (horizontal_region.kind == ROI::RegionKind::e_empty || vertical_region.kind == ROI::RegionKind::e_empty)
-        {
-            begin = end;
             continue;
-        }
         ROI::Rect const base_rect = base_region.kind == ROI::RegionKind::e_full ?
             full_rect(viewport.width, viewport.height) : base_region.rect;
         ROI::Rect const horizontal_rect = horizontal_region.kind == ROI::RegionKind::e_full ?
@@ -240,9 +245,8 @@ void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11D
         context->OMSetBlendState(states.opaque(), nullptr, 0xFFFFFFFF);
         m_geometry_pass.draw(device, context, view_proj, group);
 
-        if (!m_outline_pass.draw(context, overlay_target, m_mask_rt.srv(), vp, draws[begin].target_index + 1, profile, horizontal_rect, vertical_rect, states))
+        if (!m_outline_pass.draw(context, overlay_target, m_mask_rt.srv(), vp, group.front().target_index + 1, profile, horizontal_rect, vertical_rect, states))
             break;
-        begin = end;
     }
 }
 MASK_NAMESPACE_END

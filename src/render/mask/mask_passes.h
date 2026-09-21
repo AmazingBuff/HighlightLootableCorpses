@@ -62,8 +62,8 @@ public:
 
     [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_nearest() const noexcept { return m_depth_nearest; }
 
-    // Draw every draw (the palette skinning is built here).
-    void draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> draws);
+    // Draw every render geometry (the palette skinning is built here).
+    void draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> render_geometries);
 private:
     // InputLayout cache key (skinned, precision, attribute offsets, stride)
     struct LayoutKey
@@ -75,7 +75,7 @@ private:
         uint32_t skinning_offset;
         uint32_t stride;
         // Skinning weight/index layout: a calibration result that must enter the key so different
-        // layouts do not share one InputLayout (static draws keep the default 0/UNKNOWN).
+        // layouts do not share one InputLayout (static geometries keep the default 0/UNKNOWN).
         uint32_t weight_format;
         uint32_t weight_offset;
         uint32_t index_format;
