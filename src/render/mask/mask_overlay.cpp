@@ -112,9 +112,6 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
     REX::W32::ID3D11RenderTargetView* overlay_target, uint32_t width, uint32_t height, std::vector<DirectX::XMFLOAT4> const& colors,
     std::vector<std::vector<RenderGeometry>> const& render_geometries, CommonStates const& states)
 {
-    if (render_geometries.empty())
-        return;
-
     DirectX::XMFLOAT4X4 view_proj{};
     float const (&world_to_cam)[4][4] = camera->GetRuntimeData().worldToCam;
     for (int row = 0; row < 4; ++row)
@@ -142,7 +139,8 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
     capture.capture();
 
     REX::W32::D3D11_VIEWPORT const viewport{
-        .topLeftX = 0.0f, .topLeftY = 0.0f,
+        .topLeftX = 0.0f,
+        .topLeftY = 0.0f,
         .width = static_cast<float>(width),
         .height = static_cast<float>(height),
         .minDepth = 0.0f,
@@ -215,8 +213,6 @@ void MaskOverlay::draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11D
     // group's outer index, so object_id derives from the group's first element as before.
     for (std::vector<RenderGeometry> const& group : render_geometries)
     {
-        if (group.empty())
-            continue;
         ROI::Region const base_region = group_region(group, view_proj, static_cast<uint32_t>(viewport.width), static_cast<uint32_t>(viewport.height));
         if (base_region.kind == ROI::RegionKind::e_empty)
             continue;
