@@ -97,8 +97,9 @@ Icon distance scaling: icons shrink smoothly from 1.25x nearby to 0.75x far away
 
 ## Performance
 
-- The scan runs as a task on the game's main thread at `ScanIntervalMs` whenever the plugin is enabled, in **every** display mode (icon mode included). It walks the scene graph, validates skinned meshes, and calibrates each corpse's layout when first seen — this collection is what keeps the overlay instant when you switch display modes.
-- Per-frame cost is minimal: the render pass draws from the scan's snapshot, refreshes colors, culls off-screen targets, and compacts the draw list. Frustum culling runs on both the scan side and the render side.
+- The scan runs as a task on the game's main thread at `ScanIntervalMs` and is **detection-only** (loot filtering, bounds, distance) — it no longer touches the scene graph for geometry.
+- Mask-geometry collection happens on the render thread behind a form-id LRU cache (32 corpses, matching the corpse cap): the first time a corpse appears in view its geometry is collected on that very frame, so a fast camera turn highlights a newly visible corpse immediately instead of waiting up to one scan interval; steady-state frames reuse the cached geometry with no scene-graph traversal. Cached geometry is refreshed when the cache evicts it (recency follows the drawn corpses).
+- Per-frame cost is minimal: the render pass culls off-screen targets by frustum, refreshes colors, and compacts the draw list from the cache.
 - Work per corpse is bounded: at most 32 corpses are tracked and at most 256 render geometries are drawn per frame.
 - Relative cost per mode: **icon < silhouette < outline** — icon mode is the cheapest, silhouette mode is in the middle, outline mode is the most expensive (it computes a glow halo per target).
 

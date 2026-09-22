@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Collect corpse highlight geometry on the scan thread at the configured scan interval instead of every frame, removing the per-frame scene-graph traversal and mesh-validation cost from rendering.
+- Collect corpse highlight geometry on the render thread behind a form-id LRU cache (32 corpses): the first appearance of a corpse in view collects its geometry on that frame (no scan-interval delay after fast camera turns), and steady-state frames reuse the cached geometry without re-traversing the scene graph.
 
 - Restrict outline glow geometry and Gaussian passes to conservative projected target regions, clear the integer mask once per outline frame, and fall back to the full viewport when bounds are unavailable or unsafe.
 

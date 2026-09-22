@@ -375,60 +375,6 @@ namespace
 
         return true;
     }
-
-    // ---------------------------------------------------------------------------
-    // Mask-geometry collection (second pass of CorpseScan::search)
-    //
-    // Runs on the SKSE main-thread scan task, after the distance sort, so collection reads the
-    // scene graph serialized with the engine and the nearest corpses win the budget. For each
-    // frustum-surviving corpse (bounding-sphere pre-cull, the same test the render-side cull
-    // uses; a missing camera keeps the collect-everything behaviour) one single-target
-    // collect_render_geometries call fills the corpse's render_geometries; the shared budget makes the
-    // per-call cap enforce Max_Render_Geometries_Per_Frame across corpses, and the pass stops once
-    // Max_Corpse_Count corpses carry render geometries (nearest-first truncation, v2 semantics). Corpses
-    // beyond a cap keep empty render_geometries and stay in the list - only their highlights are skipped.
-    // ---------------------------------------------------------------------------
-
-    void collect_render_geometries(std::vector<CorpseScan::CorpseInfo>& corpses)
-    {
-        RE::NiCamera* camera = RE::Main::WorldRootCamera();
-
-        // Reused per corpse: one single-element target list and one render-geometry list, so the
-        // pass does not churn heap allocations per corpse.
-
-        size_t total_render_geometries = 0;
-        size_t corpses_with_draws = 0;
-        for (CorpseScan::CorpseInfo& corpse : corpses)
-        {
-            if (corpses_with_draws >= Max_Corpse_Count)
-            {
-                logger::warn("Mask overlay: corpse cap {} reached, extra targets not drawn", Max_Corpse_Count);
-                break;
-            }
-            if (total_render_geometries >= Max_Render_Geometries_Per_Frame)
-            {
-                logger::warn("Mask overlay: render-geometry cap {} reached, extra geometry dropped", Max_Render_Geometries_Per_Frame);
-                break;
-            }
-
-            if (camera && !camera->PointInFrustum(corpse.anchor, corpse.radius))
-                continue;
-
-            RE::TESForm* form = RE::TESForm::LookupByID(corpse.form_id);
-            const RE::TESObjectREFR* ref = form ? form->AsReference() : nullptr;
-            if (!ref)
-                continue;
-
-            std::vector<RenderGeometry> corpse_render_geometries;
-            collect_render_geometries(ref, corpse_render_geometries);
-            if (!corpse_render_geometries.empty())
-            {
-                total_render_geometries += corpse_render_geometries.size();
-                ++corpses_with_draws;
-                corpse.render_geometries.swap(corpse_render_geometries);
-            }
-        }
-    }
 }
 
 CorpseScan& CorpseScan::instance()
@@ -475,13 +421,10 @@ void CorpseScan::search()
         return false;
     });
 
-    // Second pass: mask-geometry collection, gated on enabled only (icon mode collects too, so
-    // switching display modes never shows a gap - the collection cost rides the same scan task
-    // the loot filtering already occupies). The corpse list itself is never gated (its menu
-    // consumers always need it) - when disabled every render_geometries vector stays empty and
-    // this is the only skipped work.
-    if (cfg.enabled)
-        collect_render_geometries(found);
+    // Detection data only - no geometry work here. Mask-path geometry is collected on the render
+    // thread per frame, behind the render layer's form-id LRU cache (a cache miss collects that
+    // corpse's geometries on the spot), so the scan interval never delays a highlight after a
+    // camera turn.
 
     {
         std::lock_guard lock(m_mutex);

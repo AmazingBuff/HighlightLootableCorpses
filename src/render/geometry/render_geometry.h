@@ -15,10 +15,9 @@ inline constexpr size_t Max_Palette_Bones = 128;
 inline constexpr size_t Palette_CB_Bytes = Max_Palette_Bones * 64;
 static_assert(Palette_CB_Bytes == Max_Palette_Bones * sizeof(float) * 16, "palette CB layout must be float4x4 slots");
 
-// Render-geometry cap for one collection run: past it the traversal stops and extra geometry is
-// dropped with a WARN. CorpseScan::search() collects one corpse per call and passes its remaining
-// cross-corpse budget (down from Max_Render_Geometries_Per_Frame) so the per-call cap enforces the
-// global one.
+// Render-geometry cap for one frame's draw list: past it the render branch stops appending and
+// extra geometry is dropped with a WARN. The render thread draws one corpse's cached list at a
+// time, so the branch enforces this as the flat per-frame total across corpses.
 inline constexpr size_t Max_Render_Geometries_Per_Frame = 256;
 
 
@@ -31,12 +30,12 @@ struct SkinLayout
     uint32_t index_offset;
 };
 
-// One geometry draw (cached by the scan task, consumed by the render thread; VB/IB are borrowed
-// from game objects). Lifetime: node keeps the static-path geometry (and its GPU buffers) alive;
-// the skinned path keeps its buffData/VB/IB alive through the skin (NiSkinInstance→skinPartition→
-// buffData) chain. NiPointer refcounts are atomic, so the cached entry stays valid across the
-// scan→draw gap of up to one scan interval; a 3D unload between scan and draw cannot invalidate
-// the VB/IB pointers (the render thread finishes consuming its copy within the frame it took it).
+// One geometry draw (collected and cached on the render thread; VB/IB are borrowed from game
+// objects). Lifetime: node keeps the static-path geometry (and its GPU buffers) alive; the skinned
+// path keeps its buffData/VB/IB alive through the skin (NiSkinInstance→skinPartition→buffData)
+// chain. Cached entries live in the render thread's form-id LRU cache (RenderGeometryCache) and
+// are dropped by eviction, releasing the last NiPointer reference in a same-thread refcount
+// decrement.
 struct RenderGeometry
 {
     REX::W32::ID3D11Buffer* vertex_buffer;
@@ -49,11 +48,10 @@ struct RenderGeometry
     RE::NiPointer<RE::NiSkinInstance> skin;  // keeps the skin instance alive (bone world matrices)
     RE::NiPointer<RE::BSGeometry> node;  // keeps the static-path geometry (and its GPU buffers) alive
 
-    // Index of the target in the caller's target list (collection time). The scan-side cache
-    // keeps the per-corpse slot index (0-based within one corpse); the render thread compacts
-    // frustum-surviving corpses into the per-frame visible-target order, rewriting target_index
-    // to the outer index on its local snapshot copy, so style indexing and outline grouping stay
-    // per-frame correct without any form-id remap.
+    // Index of the target in the caller's target list (collection time). The render thread compacts
+    // frustum-surviving corpses into the per-frame visible-target order, rewriting target_index to
+    // the outer index on a local copy (the cache's stored list is never mutated), so style indexing
+    // and outline grouping stay per-frame correct without any form-id remap.
     uint32_t target_index;
 
     // Position attribute layout: the static path stores the calibrate_position_format result
@@ -69,12 +67,12 @@ struct RenderGeometry
 // Collect one run's render geometries from the mask targets along two paths, static (the
 // BSTriShape family) and skinned (NiSkinPartition partitions), including position-format and
 // skin-layout self-calibration and per-mesh validation - geometries with no solution are skipped
-// (better to draw too little than to smear garbage over the screen). Runs on the SKSE main-thread
-// scan task (scene-graph reads are serialized with the engine there, same as CorpseScan::search);
-// it must not be called from the Present thread. The order of the target list is the target
-// index; after the render-geometry cap the traversal stops (extra geometry dropped, WARN). CorpseScan
-// calls it once per corpse with a single-element target list and a shrinking budget, so the
-// per-call cap doubles as the cross-corpse budget; the cap clamps to Max_Render_Geometries_Per_Frame.
+// (better to draw too little than to smear garbage over the screen). Runs on the render thread
+// (Present path): OverlayDirector's mask branch calls it per cache miss - first appearance of a
+// corpse in view pays its traversal and calibration on that frame (one corpse), while the steady
+// state is LRU cache hits and performs no scene-graph traversal at all. The order of the target
+// list is the target index; the draw-list cap Max_Render_Geometries_Per_Frame applies to the
+// per-frame total across corpses in the render branch.
 void collect_render_geometries(RE::TESObjectREFR const* ref, std::vector<RenderGeometry>& render_geometries);
 
 PLUGIN_NAMESPACE_END

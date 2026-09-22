@@ -12,6 +12,7 @@
 #include "icon/icon_overlay.h"
 #include "mask/mask_overlay.h"
 #include "render/dx11/common_states.h"
+#include "render/geometry/render_geometry_cache.h"
 #include "render/shader_manager.h"
 #include "search/corpse_finder.h"
 #include "ui/pulse_timer.h"
@@ -125,13 +126,13 @@ namespace
                 SKSE::GetTaskInterface()->AddTask([this]
                 {
                     // search() always runs: the corpse list has consumers besides the overlay
-                    // (the MCP menu reads the snapshot even with rendering disabled). Mask
-                    // geometry is collected inside search() as its second pass, gated there on
-                    // enabled only (icon mode collects too); the collection reads the scene
-                    // graph on this thread, serialized with the engine, and re-resolves each
-                    // ref's current 3D, so corpses whose 3D composition changed within the last
-                    // scan interval contribute at most one interval of staleness (acceptable
-                    // for corpses).
+                    // (the MCP menu reads the snapshot even with rendering disabled). It is
+                    // detection-only now - loot filtering, bounds and distance - and no longer
+                    // touches the scene graph for geometry. Mask-geometry collection happens on
+                    // the render thread inside draw(), behind the form-id LRU cache: a cache
+                    // miss collects that corpse's geometries on the spot, so a corpse that
+                    // becomes visible after a camera turn highlights the same frame instead of
+                    // waiting up to one scan interval.
                     CorpseScan::instance().search();
 
                     m_scan_in_flight.store(false);
@@ -216,25 +217,59 @@ namespace
                             return;
                         }
 
-                        // One outer element per visible non-empty corpse (the scan-side frustum
-                        // cull leaves out-of-view corpses with empty geometry): outer index ==
-                        // colors index == target_index, so object_id = target_index + 1 stays
-                        // aligned with the style table. Geometries move out of the local snapshot
-                        // copy after the index rewrite.
+                        // One outer element per drawn corpse. Each snapshot corpse is culled on
+                        // anchor/radius (a culled corpse never touches the cache - recency tracks
+                        // drawn corpses), then resolved through the render-thread form-id LRU
+                        // cache: a hit reuses the cached geometries, a miss collects them this
+                        // frame via collect_render_geometries (no scan-interval delay after a
+                        // camera turn); empty collections are not cached, so an unresolvable
+                        // corpse retries next frame. target_index is rewritten on a LOCAL copy -
+                        // the cache is never mutated - and the copy moves into the draw list,
+                        // keeping the nested-vector handoff to MaskOverlay::draw unchanged.
                         std::vector<DirectX::XMFLOAT4> colors;
                         colors.reserve(corpses.size());
                         std::vector<std::vector<RenderGeometry>> render_geometries;
                         render_geometries.reserve(corpses.size());
 
                         uint32_t visible_index = 0;
-                        for (CorpseScan::CorpseInfo& corpse : corpses)
+                        size_t total_render_geometries = 0;
+                        for (CorpseScan::CorpseInfo const& corpse : corpses)
                         {
-                            if (corpse.render_geometries.empty())
+                            if (visible_index >= Max_Corpse_Count)
+                            {
+                                logger::warn("Mask overlay: corpse cap {} reached, extra targets not drawn", Max_Corpse_Count);
+                                break;
+                            }
+                            if (camera && !camera->PointInFrustum(corpse.anchor, corpse.radius))
                                 continue;
-                            for (RenderGeometry& draw : corpse.render_geometries)
+
+                            std::vector<RenderGeometry> corpse_geometries;
+                            if (std::vector<RenderGeometry> const* cached = m_geometry_cache.lookup(corpse.form_id))
+                            {
+                                corpse_geometries = *cached;
+                            }
+                            else
+                            {
+                                RE::TESForm* form = RE::TESForm::LookupByID(corpse.form_id);
+                                RE::TESObjectREFR const* ref = form ? form->AsReference() : nullptr;
+                                if (ref)
+                                    collect_render_geometries(ref, corpse_geometries);
+                                m_geometry_cache.insert(corpse.form_id, std::move(corpse_geometries));
+                            }
+                            if (corpse_geometries.empty())
+                                continue;
+
+                            if (total_render_geometries + corpse_geometries.size() > Max_Render_Geometries_Per_Frame)
+                            {
+                                logger::warn("Mask overlay: render-geometry cap {} reached, extra geometry dropped", Max_Render_Geometries_Per_Frame);
+                                break;
+                            }
+                            total_render_geometries += corpse_geometries.size();
+
+                            for (RenderGeometry& draw : corpse_geometries)
                                 draw.target_index = visible_index;
                             colors.emplace_back(color.r(), color.g(), color.b(), pulse * corpse_alpha(cfg, corpse.distance, color.a()));
-                            render_geometries.push_back(std::move(corpse.render_geometries));
+                            render_geometries.push_back(std::move(corpse_geometries));
                             ++visible_index;
                         }
 
@@ -344,6 +379,10 @@ namespace
         std::unique_ptr<CommonStates> m_states;
         Icon::IconOverlay m_icon_overlay;
         Mask::MaskOverlay m_mask_overlay;
+
+        // Render-thread-only: accessed exclusively from draw() on the Present thread (no mutex);
+        // the scan task never collects geometry, so it never touches the cache.
+        RenderGeometryCache m_geometry_cache;
 
         bool m_ready;
     };
