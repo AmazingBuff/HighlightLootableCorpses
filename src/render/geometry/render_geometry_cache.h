@@ -16,9 +16,13 @@ PLUGIN_NAMESPACE_BEGIN
 // (the Present path inside OverlayDirector::draw).
 //
 // Threading contract: NO mutex. Only the render thread looks up, inserts, and
-// evicts; the scan task never touches this cache (the scan no longer collects
+// erases; the scan task never touches this cache (the scan no longer collects
 // geometry at all), so all refcount traffic on the cached NiPointers happens on
-// one thread.
+// one thread. The main-thread equip sink does not touch this cache either: it
+// only posts corpse form ids into OverlayDirector's mutex-guarded inbox, and
+// the render thread drains that inbox each frame and erases the drained keys
+// here - the inbox is the ONLY cross-thread structure in the invalidation
+// design.
 //
 // Why the cache exists: mask-geometry collection moved back to the render
 // thread so a corpse that becomes visible after a fast camera turn is collected
@@ -36,9 +40,13 @@ PLUGIN_NAMESPACE_BEGIN
 //   collected this frame is retried on the next one (the caller skips the
 //   insert); frustum-culled corpses never touch the cache at all - recency
 //   tracks drawn corpses, keeping the nearest on-screen set hot;
-// - a stale entry (the corpse's 3D composition changed since collection) is
-//   accepted until eviction, the same staleness class as the previous
-//   scan-side collection, now bounded by 32-corpse recency churn.
+// - invalidation: every entry stores the 3D root (ref->GetCurrent3D()) captured
+//   at collection time, and the render branch validates it on each hit; a
+//   mismatch erases the entry and the corpse re-collects on the miss path.
+//   Equip events reach the same erase through the inbox drain, so cached
+//   geometry tracks gear changes (taken or added) immediately. Save loads
+//   self-heal for free: every ref gets a fresh 3D root on load, so all entries
+//   mismatch on the first frame after a load and re-collect.
 //
 // Lifetime: the cached RenderGeometry NiPointers keep VB/IB (and skin/node)
 // alive while cached; eviction drops the last reference in a same-thread
@@ -48,17 +56,33 @@ PLUGIN_NAMESPACE_BEGIN
 class RenderGeometryCache
 {
 public:
-    // Returns the cached geometry list for form_id and refreshes its recency; nullptr on a miss.
-    std::vector<RenderGeometry> const* lookup(RE::FormID form_id);
+    // View of a cache hit: the cached geometry list (nullptr on a miss) plus the 3D root
+    // captured at collection time, so the caller can validate a hit against the corpse's
+    // current 3D without a second hash lookup.
+    struct Hit
+    {
+        std::vector<RenderGeometry> const* geometries;
+        RE::NiAVObject* root3d;
+    };
 
-    // Stores geometries under form_id (empty lists are ignored - they are never cached) and
-    // evicts the least recently used entry when the cache is at capacity.
-    void insert(RE::FormID form_id, std::vector<RenderGeometry>&& geometries);
+    // Returns the cached geometry list for form_id and refreshes its recency; Hit::geometries
+    // is nullptr on a miss.
+    Hit lookup(RE::FormID form_id);
+
+    // Stores geometries under form_id together with the ref's 3D root captured at collection
+    // time (empty lists are ignored - they are never cached) and evicts the least recently used
+    // entry when the cache is at capacity.
+    void insert(RE::FormID form_id, RE::NiAVObject* root3d, std::vector<RenderGeometry>&& geometries);
+
+    // Removes one entry without recency side effects; a missing key is a no-op. Render-thread
+    // only (called from the mask branch's inbox drain and root-mismatch path).
+    void erase(RE::FormID form_id);
 
 private:
     struct Entry
     {
         RE::FormID form_id;
+        RE::NiAVObject* root3d;
         std::vector<RenderGeometry> geometries;
     };
 

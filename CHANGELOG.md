@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Collect corpse highlight geometry on the render thread behind a form-id LRU cache (32 corpses): the first appearance of a corpse in view collects its geometry on that frame (no scan-interval delay after fast camera turns), and steady-state frames reuse the cached geometry without re-traversing the scene graph.
+- Collect corpse highlight geometry on the render thread behind a form-id LRU cache (32 corpses): the first appearance of a corpse in view collects its geometry on that frame (no scan-interval delay after fast camera turns), and steady-state frames reuse the cached geometry without re-traversing the scene graph. A corpse's cached geometry is invalidated as soon as its equipment changes (taken or added by any mod) or its 3D is rebuilt (e.g. on save load), so the highlight always matches the current body composition.
 
 - Restrict outline glow geometry and Gaussian passes to conservative projected target regions, clear the integer mask once per outline frame, and fall back to the full viewport when bounds are unavailable or unsafe.
 

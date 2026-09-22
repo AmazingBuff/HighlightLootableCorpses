@@ -23,6 +23,11 @@ namespace
 {
     constexpr float Hold_Fraction = 0.10f;
 
+    // Capacity cap of the equip-invalidation inbox: posts beyond it are dropped. A dropped
+    // invalidation self-heals - the stale entry still falls to the root check or eviction - so
+    // the main-thread sink can never make the render thread allocate unboundedly.
+    constexpr size_t Max_Equip_Inbox = 64;
+
     float pulse_alpha(float progress)
     {
         return progress <= Hold_Fraction ? 1.0f : std::clamp(1.0f - (progress - Hold_Fraction) / (1.0f - Hold_Fraction), 0.0f, 1.0f);
@@ -77,6 +82,16 @@ namespace
         {
             static OverlayDirector s_instance;
             return s_instance;
+        }
+
+        // Main thread (equip sink): queue a corpse whose equipment changed. The sink performs no
+        // cache access - the cache is render-thread-only - this inbox is the ONLY shared state
+        // between the threads. Posts past the cap are dropped (see Max_Equip_Inbox).
+        void queue_invalidation(RE::FormID form_id)
+        {
+            std::lock_guard<std::mutex> const lock(m_invalidations_mutex);
+            if (m_invalidations.size() < Max_Equip_Inbox)
+                m_invalidations.push_back(form_id);
         }
 
         void on_present(REX::W32::IDXGISwapChain* swap_chain)
@@ -138,6 +153,18 @@ namespace
                     m_scan_in_flight.store(false);
                 });
             }
+        }
+
+        // Render thread (head of the mask branch): swap out the queued invalidations in one
+        // short critical section. Ids that are not cache keys are simply dropped by the caller -
+        // erase of a missing key is a no-op, so no pre-filtering is needed and the cache is the
+        // only judge of its own key set.
+        std::vector<RE::FormID> drain_invalidations()
+        {
+            std::vector<RE::FormID> drained;
+            std::lock_guard<std::mutex> const lock(m_invalidations_mutex);
+            drained.swap(m_invalidations);
+            return drained;
         }
 
         void draw(REX::W32::IDXGISwapChain* swap_chain, REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context)
@@ -226,6 +253,18 @@ namespace
                         // corpse retries next frame. target_index is rewritten on a LOCAL copy -
                         // the cache is never mutated - and the copy moves into the draw list,
                         // keeping the nested-vector handoff to MaskOverlay::draw unchanged.
+                        //
+                        // Invalidation: the equip-invalidation inbox (the only cross-thread
+                        // structure) is drained at frame head and drained corpse ids are erased
+                        // from the cache; on every cache hit the corpse's current 3D root is
+                        // compared against the root captured at collection time, so a rebuilt 3D
+                        // (save load, memory purge, base swap) or gear change invalidates the
+                        // entry immediately and the corpse re-collects on the miss path. An
+                        // unresolved ref keeps the entry - the corpse has left the snapshot
+                        // anyway.
+                        for (RE::FormID const invalidated : drain_invalidations())
+                            m_geometry_cache.erase(invalidated);
+
                         std::vector<DirectX::XMFLOAT4> colors;
                         colors.reserve(corpses.size());
                         std::vector<std::vector<RenderGeometry>> render_geometries;
@@ -243,18 +282,38 @@ namespace
                             if (camera && !camera->PointInFrustum(corpse.anchor, corpse.radius))
                                 continue;
 
+                            // The ref resolves once per corpse so the hit path can validate the
+                            // cached root; the miss path needed the ref anyway.
+                            RE::TESForm* form = RE::TESForm::LookupByID(corpse.form_id);
+                            RE::TESObjectREFR const* ref = form ? form->AsReference() : nullptr;
+                            RE::NiAVObject* const current_root = ref ? ref->GetCurrent3D() : nullptr;
+
                             std::vector<RenderGeometry> corpse_geometries;
-                            if (std::vector<RenderGeometry> const* cached = m_geometry_cache.lookup(corpse.form_id))
+                            RenderGeometryCache::Hit const cached = m_geometry_cache.lookup(corpse.form_id);
+                            if (cached.geometries)
                             {
-                                corpse_geometries = *cached;
+                                // Hit: validate the cached entry's 3D root against the corpse's
+                                // current one. A mismatch means the 3D was rebuilt (gear change
+                                // without an event, save load, memory purge, base swap) - drop
+                                // the entry and take the miss path so this frame re-collects with
+                                // the fresh root. An unresolved ref keeps the entry: the corpse
+                                // has left the snapshot anyway, so drawing it this frame is
+                                // harmless (same behavior as before invalidation existed).
+                                if (ref && current_root != cached.root3d)
+                                    m_geometry_cache.erase(corpse.form_id);
+                                else
+                                    corpse_geometries = *cached.geometries;
                             }
-                            else
+
+                            // Miss path (a fresh miss, or the hit above was just invalidated):
+                            // collect now and cache with the root captured this frame. Empty
+                            // collections are not cached (insert rejects them), so an
+                            // unresolvable corpse retries next frame.
+                            if (corpse_geometries.empty())
                             {
-                                RE::TESForm* form = RE::TESForm::LookupByID(corpse.form_id);
-                                RE::TESObjectREFR const* ref = form ? form->AsReference() : nullptr;
                                 if (ref)
                                     collect_render_geometries(ref, corpse_geometries);
-                                m_geometry_cache.insert(corpse.form_id, std::move(corpse_geometries));
+                                m_geometry_cache.insert(corpse.form_id, current_root, std::move(corpse_geometries));
                             }
                             if (corpse_geometries.empty())
                                 continue;
@@ -384,6 +443,14 @@ namespace
         // the scan task never collects geometry, so it never touches the cache.
         RenderGeometryCache m_geometry_cache;
 
+        // Equip-invalidation inbox: the ONLY cross-thread state in the cache design. The
+        // main-thread equip sink pushes affected corpse form ids, the render thread drains it at
+        // the head of the mask branch each frame; both sides only ever touch it under
+        // m_invalidations_mutex. Capacity-capped by Max_Equip_Inbox (posts are dropped when
+        // full - a dropped invalidation self-heals via the root check or eviction).
+        std::mutex m_invalidations_mutex;
+        std::vector<RE::FormID> m_invalidations;
+
         bool m_ready;
     };
 
@@ -391,10 +458,55 @@ namespace
     {
         OverlayDirector::instance().on_present(swap_chain);
     }
+
+    // Main-thread equip sink: whenever an equippable item is equipped on or taken off an actor,
+    // queue that actor's form id for cache invalidation on the render thread. The sink performs
+    // NO cache access (the cache is render-thread-only) - it only pushes into the OverlayDirector
+    // inbox, the single shared structure, and stays silent per event.
+    //
+    // baseObject is filtered by form type: spells, abilities and shouts fire TESEquipEvent too
+    // but have no mesh, so only Armor/Weapon/Light/Ammo pass. Dedup is unnecessary - the render
+    // side erases per drained id and erase of a missing key is a no-op.
+    class EquipHandler final : public RE::BSTEventSink<RE::TESEquipEvent>
+    {
+    public:
+        static EquipHandler* instance()
+        {
+            static EquipHandler s_instance;
+            return &s_instance;
+        }
+
+        RE::BSEventNotifyControl ProcessEvent(
+            RE::TESEquipEvent const* event,
+            [[maybe_unused]] RE::BSTEventSource<RE::TESEquipEvent>* source) override
+        {
+            if (event && event->actor)
+            {
+                RE::TESForm const* const base = RE::TESForm::LookupByID(event->baseObject);
+                if (base)
+                {
+                    RE::FormType const type = base->GetFormType();
+                    if (type == RE::FormType::Armor || type == RE::FormType::Weapon ||
+                        type == RE::FormType::Light || type == RE::FormType::Ammo)
+                    {
+                        OverlayDirector::instance().queue_invalidation(event->actor->GetFormID());
+                    }
+                }
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
 }
 
 void Renderer::install()
 {
+    // Equip invalidation must exist before gameplay: registering here (kPostLoadGame) keeps the
+    // whole render lifecycle in one place and events before the first save load are irrelevant
+    // (no corpses to invalidate yet). AddEventSink deduplicates identical sinks, so the repeated
+    // kPostLoadGame message on every load is harmless.
+    RE::ScriptEventSourceHolder::GetSingleton()->AddEventSink(EquipHandler::instance());
+    logger::info("Registered equip-event sink for render-geometry cache invalidation"sv);
+
     (void)PresentHook::instance().install(&present_callback);
 }
 
