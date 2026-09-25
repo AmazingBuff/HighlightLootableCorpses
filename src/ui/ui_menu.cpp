@@ -2,6 +2,7 @@
 
 #include "pulse_timer.h"
 
+#include "base/util.h"
 #include "config/config.h"
 #include "render/render_util.h"
 #include "search/corpse_finder.h"
@@ -16,8 +17,13 @@ PLUGIN_NAMESPACE_BEGIN
 namespace
 {
     // Hotkey rebinding state: active while the General page shows "Press any key...". The
-    // capture ends on the first accepted key press (Menu::feed_rebind) or after the timeout.
+    // capture ends on the first accepted key press (Menu::rebind) or after the timeout.
     constexpr std::chrono::milliseconds Rebind_Timeout{5000};
+    // The same physical click reaches both the framework input hook (capture) and the imgui
+    // frame (the hotkey button's toggle): without a lockout, binding a key with a click that
+    // lands on the button would immediately restart the capture. Swallow toggle requests for a
+    // short window after each capture instead; a genuine second click arrives later than this.
+    constexpr std::chrono::milliseconds Rebind_Click_Lockout{250};
 
 
     // Display name of a stored hotkey: cfg.hotkey lives in the SKSE macro code space (keyboard
@@ -170,6 +176,27 @@ namespace
         if (ImGuiMCP::Button("Save"))
             Setting::instance().save();
     }
+
+    bool on_framework_input(RE::InputEvent* event)
+    {
+        // The framework freezes engine input while one of its windows is open, so the capture is fed
+        // through this hook instead of the engine sink. While the capture is active every key press
+        // is consumed (ESC included - it binds instead of closing the panel); anything else passes
+        // through to the framework untouched.
+        if (!Menu::instance().is_rebinding() || !event)
+            return false;
+
+        if (RE::ButtonEvent const* const button = event->AsButtonEvent())
+        {
+            uint32_t key = 0;
+            if (Util::macro_key_code(*button, key))
+            {
+                Menu::instance().rebind(*button, key);
+                return true;
+            }
+        }
+        return false;
+    }
 } // namespace
 
 Menu &Menu::instance()
@@ -183,24 +210,6 @@ bool Menu::is_menu_open()
     return SKSEMenuFramework::IsInstalled() && SKSEMenuFramework::IsAnyBlockingWindowOpened();
 }
 
-uint32_t macro_key_code(RE::ButtonEvent const& event, uint32_t& out)
-{
-    switch (event.device.get())
-    {
-    case RE::INPUT_DEVICE::kKeyboard:
-        out = event.idCode;
-        return true;
-    case RE::INPUT_DEVICE::kMouse:
-        out = SKSE::InputMap::kMacro_MouseButtonOffset + event.idCode;
-        return true;
-    case RE::INPUT_DEVICE::kGamepad:
-        out = SKSE::InputMap::kMacro_GamepadOffset + SKSE::InputMap::GamepadMaskToKeycode(event.idCode);
-        return true;
-    default:
-        return false;
-    }
-}
-
 bool Menu::is_rebinding() const
 {
     return m_rebinding;
@@ -208,6 +217,11 @@ bool Menu::is_rebinding() const
 
 void Menu::toggle_rebinding()
 {
+    // Restart lockout (see Rebind_Click_Lockout): the imgui click of the very click that was
+    // just captured must not restart the capture.
+    if (std::chrono::steady_clock::now() - m_last_capture < Rebind_Click_Lockout)
+        return;
+
     m_rebinding = !m_rebinding;
     m_rebind_start = std::chrono::steady_clock::now();
 }
@@ -225,28 +239,7 @@ void Menu::rebind(RE::ButtonEvent const& event, uint32_t macro_key)
 
     Setting::instance().get_config().hotkey = macro_key;
     m_rebinding = false;
-}
-
-bool __stdcall Menu::on_framework_input(RE::InputEvent* event)
-{
-    // The framework freezes engine input while one of its windows is open, so the capture is fed
-    // through this hook instead of the engine sink. While the capture is active every key press
-    // is consumed (ESC included - it binds instead of closing the panel); anything else passes
-    // through to the framework untouched.
-    Menu& menu = instance();
-    if (!menu.is_rebinding() || !event)
-        return false;
-
-    if (RE::ButtonEvent const* const button = event->AsButtonEvent())
-    {
-        uint32_t key = 0;
-        if (macro_key_code(*button, key))
-        {
-            menu.rebind(*button, key);
-            return true;
-        }
-    }
-    return false;
+    m_last_capture = std::chrono::steady_clock::now();
 }
 
 void Menu::register_menu()
@@ -270,7 +263,7 @@ void Menu::register_menu()
     // The framework freezes engine input while one of its windows is open - the rebinding
     // capture is fed through the framework's own input hook (the returned registration handle
     // is intentionally kept for the plugin's lifetime, like every other registration here).
-    SKSEMenuFramework::AddInputEvent(&Menu::on_framework_input);
+    SKSEMenuFramework::AddInputEvent(on_framework_input);
     s_registered = true;
 
     logger::info("Registered settings pages (General, Display, LootFilter, Stat; SKSE Menu Framework v{:.2f})",
