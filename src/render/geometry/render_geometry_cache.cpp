@@ -26,14 +26,14 @@ void RenderGeometryCache::install()
     // kPostLoadGame keeps the whole render lifecycle in one place and events before the first
     // save load are irrelevant (no corpses to invalidate yet). AddEventSink deduplicates
     // identical sinks, so the repeated message on every load is harmless.
-    RE::ScriptEventSourceHolder::GetSingleton()->AddEventSink(&m_equip_sink);
+    RE::ScriptEventSourceHolder::GetSingleton()->AddEventSink(&m_equip_handler);
     logger::info("Registered equip-event sink for render-geometry cache invalidation"sv);
 }
 
 RenderGeometryCache::Hit RenderGeometryCache::lookup(RE::FormID form_id)
 {
-    std::unordered_map<RE::FormID, std::list<Entry>::iterator>::const_iterator const it = m_index.find(form_id);
-    if (it == m_index.end())
+    std::unordered_map<RE::FormID, std::list<Entry>::iterator>::const_iterator const it = m_indices.find(form_id);
+    if (it == m_indices.end())
         return { nullptr, nullptr };
 
     // Hit: splice the entry to the back (most recently used) and hand out its list and root.
@@ -50,13 +50,13 @@ void RenderGeometryCache::insert(RE::FormID form_id, RE::NiAVObject* root3d, std
         return;
 
     m_entries.push_back(Entry{ form_id, root3d, std::move(geometries) });
-    m_index.emplace(form_id, std::prev(m_entries.end()));
+    m_indices.emplace(form_id, std::prev(m_entries.end()));
 
     if (m_entries.size() > Max_Corpse_Count)
     {
         // Evict the least recently used entry (list front); dropping it releases the cached
         // NiPointers' last reference, on this thread.
-        m_index.erase(m_entries.front().form_id);
+        m_indices.erase(m_entries.front().form_id);
         m_entries.pop_front();
     }
 }
@@ -66,12 +66,12 @@ void RenderGeometryCache::erase(RE::FormID form_id)
     // Invalidation path: a drained inbox id or a root-pointer mismatch on a cache hit drops the
     // entry so the corpse re-collects with fresh geometry this frame; dropping the list node
     // releases the cached NiPointers' last reference, on this thread.
-    std::unordered_map<RE::FormID, std::list<Entry>::iterator>::const_iterator const it = m_index.find(form_id);
-    if (it == m_index.end())
-        return;
-
-    m_entries.erase(it->second);
-    m_index.erase(it);
+    std::unordered_map<RE::FormID, std::list<Entry>::iterator>::const_iterator const it = m_indices.find(form_id);
+    if (it != m_indices.end())
+    {
+        m_entries.erase(it->second);
+        m_indices.erase(it);
+    }
 }
 
 void RenderGeometryCache::drain_invalidations()
@@ -89,7 +89,7 @@ void RenderGeometryCache::drain_invalidations()
         erase(invalidated);
 }
 
-RE::BSEventNotifyControl RenderGeometryCache::EquipSink::ProcessEvent(
+RE::BSEventNotifyControl RenderGeometryCache::EquipHandler::ProcessEvent(
     RE::TESEquipEvent const* event,
     [[maybe_unused]] RE::BSTEventSource<RE::TESEquipEvent>* source)
 {
@@ -102,7 +102,7 @@ RE::BSEventNotifyControl RenderGeometryCache::EquipSink::ProcessEvent(
             if (type == RE::FormType::Armor || type == RE::FormType::Weapon ||
                 type == RE::FormType::Light || type == RE::FormType::Ammo)
             {
-                RenderGeometryCache::instance().queue_invalidation(event->actor->GetFormID());
+                instance().queue_invalidation(event->actor->GetFormID());
             }
         }
     }

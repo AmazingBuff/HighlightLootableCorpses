@@ -117,7 +117,7 @@ private:
     // baseObject is filtered by form type: spells, abilities and shouts fire TESEquipEvent too
     // but have no mesh, so only Armor/Weapon/Light/Ammo pass. Dedup is unnecessary - the render
     // side erases per drained id and erase of a missing key is a no-op.
-    class EquipSink final : public RE::BSTEventSink<RE::TESEquipEvent>
+    class EquipHandler final : public RE::BSTEventSink<RE::TESEquipEvent>
     {
     public:
         RE::BSEventNotifyControl ProcessEvent(
@@ -131,18 +131,18 @@ private:
         RE::NiAVObject* root3d;
         std::vector<RenderGeometry> geometries;
     };
-
+private:
     RenderGeometryCache();
     ~RenderGeometryCache();
 
     // Main-thread posting target of EquipSink: the ONLY shared state between the threads. Posts
     // past the cap are dropped (see Max_Equip_Inbox in the cpp).
     void queue_invalidation(RE::FormID form_id);
-
+private:
     // list + hash map: O(1) lookup and O(1) recency moves; the front of the list is the least
     // recently used entry, the back the most recently used one.
     std::list<Entry> m_entries;
-    std::unordered_map<RE::FormID, std::list<Entry>::iterator> m_index;
+    std::unordered_map<RE::FormID, std::list<Entry>::iterator> m_indices;
 
     // Equip-invalidation inbox: the ONLY cross-thread state in the cache design. The
     // main-thread equip sink pushes affected corpse form ids, the render thread drains it at
@@ -151,7 +151,7 @@ private:
     std::mutex m_invalidations_mutex;
     std::vector<RE::FormID> m_invalidations;
 
-    EquipSink m_equip_sink;
+    EquipHandler m_equip_handler;
 };
 
 PLUGIN_NAMESPACE_END
