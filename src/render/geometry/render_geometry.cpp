@@ -953,7 +953,7 @@ namespace
 
         RE::NiSkinInstance* skin = geom_rt.skinInstance.get();
         RE::NiSkinPartition* skin_partition = skin ? skin->skinPartition.get() : nullptr;
-        if (!skin || !skin_partition || !skin->skinData || !skin->skinData->GetBoneData() || !skin->boneWorldTransforms || !skin->bones)
+        if (!skin || !skin_partition || !skin->skinData || skin->skinData->GetBoneCount() == 0 || !skin->boneWorldTransforms || !skin->bones)
         {
             std::string missing;
             auto const note = [&missing](bool null, char const* field)
@@ -968,7 +968,7 @@ namespace
             note(!skin, "skinInstance");
             note(skin && !skin_partition, "skinPartition");
             note(skin && !skin->skinData, "skinData");
-            note(skin && skin->skinData && !skin->skinData->GetBoneData(), "skinData->GetBoneData()");
+            note(skin && skin->skinData && skin->skinData->GetBoneCount() == 0, "skinData->GetBoneCount() == 0");
             note(skin && !skin->boneWorldTransforms, "boneWorldTransforms");
             note(skin && !skin->bones, "bones");
             logger::warn("Mask overlay: skip skinned draw [skin instance incomplete] node={} missing=[{}] rtti={}",
