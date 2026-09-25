@@ -38,6 +38,7 @@
 
 ### Fixed
 
+- Fix icon markers appearing where no corpse is and moving illogically as the view rotates. Three causes: corpses whose world bounds could not be measured kept the default (0, 0, 0) bounding corners, so their markers projected at the world origin (the marker corners now fall back to the corpse anchor); points behind the camera could pass the projection checks and mirror onto the screen as ghost markers (both projection paths now reject them); and the icon grouping hysteresis read from a map that was rebuilt empty every frame, so grouping re-derived from scratch and markers jumped whenever a camera move changed screen-space distances (the previous frame's assignment is now persisted across frames).
 - Preserve each target's outline when another highlighted target covers its silhouette, and merge crossing outlines with alpha blending.
 - Prevent target style IDs above 255 from aliasing earlier entries; the existing geometry draw budget remains unchanged.
 

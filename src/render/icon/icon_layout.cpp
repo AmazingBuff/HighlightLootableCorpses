@@ -68,6 +68,11 @@ bool icon_screen_tip(float px, float py, DirectX::XMFLOAT2& tip)
 
 bool icon_clip_tip(DirectX::XMFLOAT4 const& clip, float width, float height, DirectX::XMFLOAT2& tip)
 {
+    // A point behind the camera has a negative w: depth = z / w stays positive (both terms are
+    // negative) and can land inside [0, 1], which would mirror the tip onto the screen as a
+    // ghost marker that swings wildly while the view rotates. Reject these outright.
+    if (clip.w <= 0.0f)
+        return false;
     float const depth = clip.z / clip.w;
     if (depth < 0.0f || depth > 1.0f)
         return false;
@@ -76,7 +81,7 @@ bool icon_clip_tip(DirectX::XMFLOAT4 const& clip, float width, float height, Dir
 
 
 std::vector<IconMarker> icon_marker(std::span<IconCandidate const> candidates,
-    float base_radius, float max_distance, size_t marker_limit)
+    float base_radius, float max_distance, size_t marker_limit, std::unordered_map<uint32_t, uint32_t>& previous_groups)
 {
     std::unordered_map<uint32_t, uint32_t> membership;
 
@@ -86,8 +91,8 @@ std::vector<IconMarker> icon_marker(std::span<IconCandidate const> candidates,
     {
         float const radius = icon_radius(base_radius, candidate.distance, max_distance, false);
 
-        std::unordered_map<uint32_t, uint32_t>::const_iterator const previous = membership.find(candidate.form_id);
-        members.emplace_back(candidate, radius, previous == membership.end() ? 0 : previous->second);
+        std::unordered_map<uint32_t, uint32_t>::const_iterator const previous = previous_groups.find(candidate.form_id);
+        members.emplace_back(candidate, radius, previous == previous_groups.end() ? 0 : previous->second);
     }
 
     std::ranges::sort(members, [](Member const& a, Member const& b)
@@ -197,6 +202,11 @@ std::vector<IconMarker> icon_marker(std::span<IconCandidate const> candidates,
     });
     if (markers.size() > marker_limit)
         markers.resize(marker_limit);
+
+    // Persist this frame's corpse→representative assignment for the next frame's hysteresis.
+    // Assignments for candidates dropped by the marker limit are kept too - they stabilise the
+    // grouping when the camera moves a corpse in or out of the limit.
+    previous_groups = std::move(membership);
     return markers;
 }
 

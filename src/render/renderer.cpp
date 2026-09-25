@@ -61,7 +61,10 @@ namespace
     {
         float px = 0.0f, py = 0.0f, depth = 0.0f;
         if (project(camera, point, width, height, px, py, depth))
-            return Icon::icon_screen_tip(px, py, tip);
+            // The depth gate rejects points behind the near plane / past the far plane: the
+            // projection math keeps producing coordinates there, but they mirror through the
+            // camera plane and would place ghost icons that swing wildly as the view rotates.
+            return depth > 0.0f && depth <= 1.0f && Icon::icon_screen_tip(px, py, tip);
         if (!view_data)
             return false;
         Matrix const& matrix = view_data->viewProjMatrixUnjittered._11 != 0.0f ? view_data->viewProjMatrixUnjittered : view_data->viewProjMat;
@@ -195,7 +198,7 @@ namespace
                             float const alpha = pulse * corpse_alpha(cfg, corpse.distance, color.a());
                             candidates.emplace_back(corpse.form_id, render_cast(corpse.anchor), tip, corpse.distance, alpha);
                         }
-                        std::vector<Icon::IconMarker> const markers = Icon::icon_marker(candidates, static_cast<float>(cfg.icon_radius), cfg.max_distance, Max_Corpse_Count);
+                        std::vector<Icon::IconMarker> const markers = Icon::icon_marker(candidates, static_cast<float>(cfg.icon_radius), cfg.max_distance, Max_Corpse_Count, m_icon_groups);
 
                         std::vector<Icon::IconVertex> vertices;
                         for (Icon::IconMarker const& marker : std::views::reverse(markers))
@@ -406,6 +409,11 @@ namespace
 
         REX::W32::ID3D11Texture2D* m_back_buffer;
         REX::W32::ID3D11RenderTargetView* m_render_target;
+
+        // Icon-mode grouping state: the corpse→representative assignment of the previous drawn
+        // frame (icon_marker reads it for the hysteresis and writes the new assignment back).
+        // Only touched on the render thread inside draw().
+        std::unordered_map<uint32_t, uint32_t> m_icon_groups;
 
         std::unique_ptr<CommonStates> m_states;
         Icon::IconOverlay m_icon_overlay;

@@ -324,14 +324,22 @@ namespace
                 entry.anchor = { (b_min.x + b_max.x) * 0.5f, (b_min.y + b_max.y) * 0.5f, (b_min.z + b_max.z) * 0.5f };
                 entry.radius = std::max((b_max - b_min).Length() * 0.5f, 10.0f);
             }
-            else if (RE::NiAVObject const* node = actor->Get3D())
+            else
             {
-                RE::NiBound const& bound = node->worldBound;
-                if (bound.radius > 0.0f && bound.radius < 10000.0f)
+                if (RE::NiAVObject const* node = actor->Get3D())
                 {
-                    entry.anchor = bound.center;
-                    entry.radius = bound.radius;
+                    RE::NiBound const& bound = node->worldBound;
+                    if (bound.radius > 0.0f && bound.radius < 10000.0f)
+                    {
+                        entry.anchor = bound.center;
+                        entry.radius = bound.radius;
+                    }
                 }
+                // No world AABB could be measured (no live ragdoll / collision / geometry bounds):
+                // pin the icon corners to the raised ref position instead of leaving the default
+                // (0, 0, 0) corners, which would project the icon at the world origin.
+                entry.bound_min = entry.anchor;
+                entry.bound_max = entry.anchor;
             }
         }
         else
@@ -367,6 +375,13 @@ namespace
             {
                 entry.bound_min = b_min;
                 entry.bound_max = b_max;
+            }
+            else
+            {
+                // Same degenerate-bounds fallback as the actor branch: keep the icon away from
+                // the world origin.
+                entry.bound_min = entry.anchor;
+                entry.bound_max = entry.anchor;
             }
             entry.distance = (entry.anchor - player->GetPosition()).Length();
         }
