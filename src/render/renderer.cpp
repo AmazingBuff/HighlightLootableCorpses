@@ -83,7 +83,6 @@ namespace
         {
             std::lock_guard<std::mutex> const draw_lock(m_draw_mutex);
 
-            m_icon_overlay.end_frame();
             schedule_scan();
 
             RE::BSGraphics::Renderer* renderer = RE::BSGraphics::Renderer::GetSingleton();
