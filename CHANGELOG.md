@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Split the single MCP settings page into General / Display / LootFilter sub-pages mirroring the INI sections, and add a Stat page showing the current runtime status (enabled state, display and hotkey mode, hotkey, corpse count and nearest distance) together with the Save action.
+
 - Collect corpse highlight geometry on the render thread behind a form-id LRU cache (32 corpses): the first appearance of a corpse in view collects its geometry on that frame (no scan-interval delay after fast camera turns), and steady-state frames reuse the cached geometry without re-traversing the scene graph. A corpse's cached geometry is invalidated as soon as its equipment changes (taken or added by any mod) or its 3D is rebuilt (e.g. on save load), so the highlight always matches the current body composition.
 
 - Upload each skin's palette constant buffer once per frame per skin instance instead of once per partition draw, and record per geometry whether the engine keeps source GPU buffers for skinned meshes (it does not - skinned draws come exclusively from the NiSkinPartition partition buffers).

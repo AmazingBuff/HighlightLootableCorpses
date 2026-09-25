@@ -53,10 +53,27 @@ namespace
         return fmt::format("0x{:02X}", vk);
     }
 
-    // MCP menu callback: runs on the game's main thread (the framework calls it inside an imgui
-    // frame) and reads/writes the Config settings directly; a change takes effect immediately and
-    // the render thread reads it without a lock (the same pattern as set_enabled).
-    void render_settings()
+    // MCP menu callbacks: run on the game's main thread (the framework calls them inside an imgui
+    // frame) and read/write the Config settings directly; a change takes effect immediately and
+    // the render thread reads it without a lock (the same pattern as set_enabled). The pages
+    // mirror the INI sections (General / Display / LootFilter), plus a Stat page with the runtime
+    // status and the Save action.
+
+    constexpr Config::HotkeyMode s_hotkey_modes[] = {
+        Config::HotkeyMode::e_constant,
+        Config::HotkeyMode::e_pulse,
+    };
+    constexpr char const* s_hotkey_mode_names[] = { "Constant", "Pulse" };
+
+    constexpr Config::DisplayMode s_display_modes[] = {
+        Config::DisplayMode::e_silhouette,
+        Config::DisplayMode::e_outline,
+        Config::DisplayMode::e_icon,
+    };
+    constexpr char const* s_display_mode_names[] = { "Silhouette", "Outline", "Icon" };
+
+    // INI section [General]
+    void render_general()
     {
         Config& cfg = Setting::instance().get_config();
 
@@ -67,11 +84,6 @@ namespace
         if (ImGuiMCP::Button(label.c_str()))
             s_rebinding = !s_rebinding;
 
-        static constexpr Config::HotkeyMode s_hotkey_modes[] = {
-            Config::HotkeyMode::e_constant,
-            Config::HotkeyMode::e_pulse,
-        };
-        static constexpr char const* s_hotkey_mode_names[] = { "Constant", "Pulse" };
         size_t hk_index = static_cast<size_t>(cfg.hotkey_mode);
         if (ImGuiMCP::Button(fmt::format("Hotkey Mode: {}", s_hotkey_mode_names[hk_index]).c_str()))
         {
@@ -88,15 +100,13 @@ namespace
             ImGuiMCP::SliderInt("Pulse Duration (ms)", &cfg.pulse_duration_ms, Setting::Min_Pulse_Duration_Ms, Setting::Max_Pulse_Duration_Ms);
 
         ImGuiMCP::SliderInt("Scan Interval (ms)", &cfg.scan_interval_ms, Setting::Min_Scan_Interval, Setting::Max_Scan_Interval);
+    }
 
-        ImGuiMCP::Separator();
+    // INI section [Display]
+    void render_display()
+    {
+        Config& cfg = Setting::instance().get_config();
 
-        static constexpr Config::DisplayMode s_display_modes[] = {
-            Config::DisplayMode::e_silhouette,
-            Config::DisplayMode::e_outline,
-            Config::DisplayMode::e_icon,
-        };
-        static constexpr char const* s_display_mode_names[] = { "Silhouette", "Outline", "Icon" };
         size_t mode_index = static_cast<size_t>(cfg.display_mode);
         if (ImGuiMCP::Button(fmt::format("Display Mode: {}", s_display_mode_names[mode_index]).c_str()))
         {
@@ -117,8 +127,12 @@ namespace
         ImGuiMCP::SliderFloat("Max Search Distance", &cfg.max_distance, Setting::Min_Max_Distance, Setting::Max_Max_Distance, "%.0f");
         ImGuiMCP::SliderFloat("Fade Start Distance", &cfg.fade_start_distance, 0.0f, cfg.max_distance, "%.0f");
         ImGuiMCP::SliderFloat("Fade Power", &cfg.fade_power, Setting::Min_Fade_Power, Setting::Max_Fade_Power, "%.1f");
+    }
 
-        ImGuiMCP::Separator();
+    // INI section [LootFilter]
+    void render_loot_filter()
+    {
+        Config& cfg = Setting::instance().get_config();
 
         ImGuiMCP::Checkbox("Hide Searched Corpses", &cfg.hide_searched_enabled);
 
@@ -154,6 +168,17 @@ namespace
 
         ImGuiMCP::Checkbox("Consumables", &cfg.value_consumables);
         ImGuiMCP::EndDisabled();
+    }
+
+    // Runtime status and persistence (no editable settings)
+    void render_stat()
+    {
+        Config const& cfg = Setting::instance().get_config();
+
+        ImGuiMCP::Text("Enabled: %s", cfg.enabled ? "yes" : "no");
+        ImGuiMCP::Text("Display Mode: %s", s_display_mode_names[static_cast<size_t>(cfg.display_mode)]);
+        ImGuiMCP::Text("Hotkey Mode: %s", s_hotkey_mode_names[static_cast<size_t>(cfg.hotkey_mode)]);
+        ImGuiMCP::Text("Hotkey: %s", hotkey_name(cfg.hotkey).c_str());
 
         ImGuiMCP::Separator();
 
@@ -163,6 +188,8 @@ namespace
             nearest = nearest == 0.0f ? corpse.distance : std::min(nearest, corpse.distance);
 
         ImGuiMCP::Text("Corpses: %d | Nearest: %.0f units", static_cast<int>(corpses.size()), nearest);
+
+        ImGuiMCP::Separator();
 
         if (ImGuiMCP::Button("Save"))
             Setting::instance().save();
@@ -188,10 +215,15 @@ void Menu::register_menu()
     }
 
     SKSEMenuFramework::SetSection("Highlight Lootable Corpses");
-    SKSEMenuFramework::AddSectionItem("Settings", render_settings);
+    // The pages mirror the INI sections; Stat carries the runtime status and the Save action.
+    SKSEMenuFramework::AddSectionItem("General", render_general);
+    SKSEMenuFramework::AddSectionItem("Display", render_display);
+    SKSEMenuFramework::AddSectionItem("LootFilter", render_loot_filter);
+    SKSEMenuFramework::AddSectionItem("Stat", render_stat);
     s_registered = true;
 
-    logger::info("Registered settings page (SKSE Menu Framework v{:.2f})", SKSEMenuFramework::GetMenuFrameworkVersion());
+    logger::info("Registered settings pages (General, Display, LootFilter, Stat; SKSE Menu Framework v{:.2f})",
+        SKSEMenuFramework::GetMenuFrameworkVersion());
 }
 
 PLUGIN_NAMESPACE_END
