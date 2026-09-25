@@ -375,6 +375,11 @@ bool MaskGeometryPass::ensure_dynamic_position_vb(REX::W32::ID3D11Device* device
 
 void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> render_geometries)
 {
+    // The palette constant buffer belongs to a skin instance (bone world transforms + skin-to-bone
+    // data), and consecutive draws of one geometry's partitions share it - upload only when the
+    // skin changes. Bone matrices move every frame, so the first skinned draw of each call always
+    // uploads (palette_skin starts null).
+    RE::NiSkinInstance* palette_skin = nullptr;
     for (RenderGeometry const& draw : render_geometries)
     {
         if (!draw.vertex_buffer || !draw.index_buffer || draw.index_count == 0 || draw.vertex_stride == 0)
@@ -424,7 +429,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
         context->Unmap(m_per_draw_cb, 0);
         context->VSSetConstantBuffers(0, 1, &m_per_draw_cb);
 
-        if (skinned)
+        if (skinned && draw.skin.get() != palette_skin)
         {
             RE::NiSkinInstance* skin = draw.skin.get();
 
@@ -495,6 +500,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
             std::memcpy(mapped.data, palette, Max_Palette_Bones * sizeof(DirectX::XMFLOAT4X4));
             context->Unmap(m_palette_cb, 0);
             context->VSSetConstantBuffers(1, 1, &m_palette_cb);
+            palette_skin = skin;
         }
 
         context->IASetInputLayout(layout);
