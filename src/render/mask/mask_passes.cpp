@@ -382,8 +382,8 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
 
         PerDrawCBData cb_data{};
         cb_data.mvp = per_draw;
-
         cb_data.object_id = draw.target_index + 1;
+
         REX::W32::D3D11_MAPPED_SUBRESOURCE mapped{};
         if (!REX::W32::SUCCESS(context->Map(m_per_draw_cb, 0, REX::W32::D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
             return;

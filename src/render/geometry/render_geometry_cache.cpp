@@ -12,6 +12,19 @@ namespace
     // invalidation self-heals - the stale entry still falls to the root check or eviction - so
     // the main-thread sink can never make the render thread allocate unboundedly.
     constexpr size_t Max_Equip_Inbox = 64;
+
+    // Releases the device objects owned by a dying entry's geometries (the positionless
+    // geometry's position_stream buffers; see RenderGeometry::position_buffer). Render-thread
+    // only, reached from erase and eviction - both run while the device is alive. Per-frame
+    // copies of RenderGeometry borrow these pointers and never release them.
+    void release_position_buffers(std::vector<RenderGeometry> const& geometries)
+    {
+        for (RenderGeometry const& geometry : geometries)
+        {
+            if (geometry.position_buffer)
+                geometry.position_buffer->Release();
+        }
+    }
 }
 
 RenderGeometryCache& RenderGeometryCache::instance()
@@ -39,15 +52,6 @@ RenderGeometryCache::Hit RenderGeometryCache::lookup(RE::FormID form_id)
     // Hit: splice the entry to the back (most recently used) and hand out its list and root.
     m_entries.splice(m_entries.end(), m_entries, it->second);
     return { &it->second->geometries, it->second->root3d };
-}
-
-void RenderGeometryCache::release_position_buffers(std::vector<RenderGeometry> const& geometries)
-{
-    for (RenderGeometry const& geometry : geometries)
-    {
-        if (geometry.position_buffer)
-            geometry.position_buffer->Release();
-    }
 }
 
 void RenderGeometryCache::insert(RE::FormID form_id, RE::NiAVObject* root3d, std::vector<RenderGeometry>&& geometries)

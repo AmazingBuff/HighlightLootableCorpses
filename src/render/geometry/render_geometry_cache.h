@@ -141,12 +141,6 @@ private:
     RenderGeometryCache();
     ~RenderGeometryCache();
 
-    // Releases the device objects owned by a dying entry's geometries (the positionless
-    // geometry's position_stream buffers; see RenderGeometry::position_buffer). Render-thread
-    // only, reached from erase and eviction - both run while the device is alive. Per-frame
-    // copies of RenderGeometry borrow these pointers and never release them.
-    static void release_position_buffers(std::vector<RenderGeometry> const& geometries);
-
     // Main-thread posting target of EquipSink: the ONLY shared state between the threads. Posts
     // past the cap are dropped (see Max_Equip_Inbox in the cpp).
     void queue_invalidation(RE::FormID form_id);
