@@ -109,9 +109,6 @@ private:
     };
 private:
     bool create_pipeline(REX::W32::ID3D11Device* device);
-    // Dynamic (positionless) draws upload their dynamicData positions into a scratch vertex
-    // buffer each draw; grows on demand (returns false on device failure).
-    bool ensure_dynamic_position_vb(REX::W32::ID3D11Device* device, uint32_t vertex_count);
     REX::W32::ID3D11InputLayout* get_layout(
         REX::W32::ID3D11Device* device,
         REX::W32::ID3DBlob* blob,
@@ -130,12 +127,6 @@ private:
     REX::W32::ID3D11Buffer* m_per_draw_cb;  // b0: row_major float4x4 + uint object_id (80 bytes)
     REX::W32::ID3D11Buffer* m_palette_cb;   // b1: row_major float4x4[Max_Palette_Bones]
     REX::W32::ID3D11DepthStencilState* m_depth_nearest;  // Reverse-Z nearest-depth test; no CommonStates equivalent.
-
-    // Scratch vertex buffer for positionless dynamic draws (float4 per vertex), mapped and
-    // refilled per draw from BSDynamicTriShape::dynamicData; owned here so nothing
-    // device-lifetime-sensitive enters the cached RenderGeometry entries.
-    REX::W32::ID3D11Buffer* m_dynamic_position_vb;
-    uint32_t m_dynamic_position_capacity;  // vertices
 
     // InputLayout cache: keyed by (skinned, precision, attribute offsets, stride) - the attribute
     // offsets come from each mesh's vertexDesc and creating a device object per mesh is not

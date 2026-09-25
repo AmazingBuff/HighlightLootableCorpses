@@ -287,7 +287,7 @@ namespace
                             if (corpse_geometries.empty())
                             {
                                 if (ref)
-                                    collect_render_geometries(ref, corpse_geometries);
+                                    collect_render_geometries(ref, device, corpse_geometries);
                                 RenderGeometryCache::instance().insert(corpse.form_id, current_root, std::move(corpse_geometries));
                             }
                             if (corpse_geometries.empty())

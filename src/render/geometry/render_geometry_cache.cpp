@@ -41,6 +41,15 @@ RenderGeometryCache::Hit RenderGeometryCache::lookup(RE::FormID form_id)
     return { &it->second->geometries, it->second->root3d };
 }
 
+void RenderGeometryCache::release_position_buffers(std::vector<RenderGeometry> const& geometries)
+{
+    for (RenderGeometry const& geometry : geometries)
+    {
+        if (geometry.position_buffer)
+            geometry.position_buffer->Release();
+    }
+}
+
 void RenderGeometryCache::insert(RE::FormID form_id, RE::NiAVObject* root3d, std::vector<RenderGeometry>&& geometries)
 {
     // Callers insert only right after a lookup miss on the same key, so the key cannot be present
@@ -55,7 +64,8 @@ void RenderGeometryCache::insert(RE::FormID form_id, RE::NiAVObject* root3d, std
     if (m_entries.size() > Max_Corpse_Count)
     {
         // Evict the least recently used entry (list front); dropping it releases the cached
-        // NiPointers' last reference, on this thread.
+        // NiPointers' last reference and the entry's position_stream buffers, on this thread.
+        release_position_buffers(m_entries.front().geometries);
         m_indices.erase(m_entries.front().form_id);
         m_entries.pop_front();
     }
@@ -65,10 +75,12 @@ void RenderGeometryCache::erase(RE::FormID form_id)
 {
     // Invalidation path: a drained inbox id or a root-pointer mismatch on a cache hit drops the
     // entry so the corpse re-collects with fresh geometry this frame; dropping the list node
-    // releases the cached NiPointers' last reference, on this thread.
+    // releases the cached NiPointers' last reference and the entry's position_stream buffers,
+    // on this thread.
     std::unordered_map<RE::FormID, std::list<Entry>::iterator>::const_iterator const it = m_indices.find(form_id);
     if (it != m_indices.end())
     {
+        release_position_buffers(it->second->geometries);
         m_entries.erase(it->second);
         m_indices.erase(it);
     }

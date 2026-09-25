@@ -66,28 +66,28 @@ struct RenderGeometry
     // Positionless skinned partitions (partition vertex desc without VF_VERTEX, e.g. FaceGen-family
     // BSDynamicTriShape head parts - head, eyes, hair): the partition buffer carries only
     // UV/normal/tangent/color and the SKINNING block; model-space positions live in
-    // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex). At draw time the position
-    // stream is rebuilt into a scratch vertex buffer: position_count entries are copied
-    // identity-mapped from dynamicData; when the partition turns out to be a packed subset
-    // (all index-buffer values below part.vertices AND a vertexMap present), the first
-    // vertex_count entries are additionally remapped through vertex_map. The engine does not
-    // keep a source vertex buffer for skinned geometry (measured: rendererData->vertexBuffer is
-    // null), so the partition buffers are the only skin-data source. dynamic_positions == null
-    // marks the standard single-stream paths.
-    const void* dynamic_positions;
-    const std::uint16_t* vertex_map;
-    uint32_t position_count;  // identity-copy length (original positions) for the scratch stream
+    // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex). At collection time the
+    // position stream is rebuilt (identity for whole-mesh index space, vertexMap-remapped for
+    // packed subsets) into this dedicated float4-per-vertex GPU buffer. Corpses are static
+    // (dynamicData no longer changes after death), so the stream is uploaded once per collection
+    // and bound directly, instead of being re-uploaded through a scratch buffer every frame.
+    // Ownership: created by collect_render_geometries on the render thread; owned by the
+    // RenderGeometryCache entry and released when that entry is erased or evicted - per-frame
+    // copies of RenderGeometry borrow the pointer and must never release it. Null for the
+    // standard single-stream paths (slot 0 then carries positions inside vertex_buffer).
+    REX::W32::ID3D11Buffer* position_buffer;
 };
 
 // Collect one run's render geometries from the mask targets along two paths, static (the
 // BSTriShape family) and skinned (NiSkinPartition partitions), including position-format and
-// skin-layout self-calibration and per-mesh validation - geometries with no solution are skipped
-// (better to draw too little than to smear garbage over the screen). Runs on the render thread
+// skin-layout self-calibration, per-mesh validation and the creation of the positionless
+// geometry's cached position-stream buffers - geometries with no solution are skipped (better
+// to draw too little than to smear garbage over the screen). Runs on the render thread
 // (Present path): OverlayDirector's mask branch calls it per cache miss - first appearance of a
 // corpse in view pays its traversal and calibration on that frame (one corpse), while the steady
 // state is LRU cache hits and performs no scene-graph traversal at all. The order of the target
 // list is the target index; the draw-list cap Max_Render_Geometries_Per_Frame applies to the
 // per-frame total across corpses in the render branch.
-void collect_render_geometries(RE::TESObjectREFR const* ref, std::vector<RenderGeometry>& render_geometries);
+void collect_render_geometries(RE::TESObjectREFR const* ref, REX::W32::ID3D11Device* device, std::vector<RenderGeometry>& render_geometries);
 
 PLUGIN_NAMESPACE_END

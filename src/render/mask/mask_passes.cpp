@@ -150,9 +150,7 @@ MaskGeometryPass::MaskGeometryPass() :
     m_ref_ps_mask(nullptr),
     m_per_draw_cb(nullptr),
     m_palette_cb(nullptr),
-    m_depth_nearest(nullptr),
-    m_dynamic_position_vb(nullptr),
-    m_dynamic_position_capacity(0) {}
+    m_depth_nearest(nullptr) {}
 
 MaskGeometryPass::~MaskGeometryPass()
 {
@@ -331,46 +329,10 @@ void MaskGeometryPass::release()
         m_per_draw_cb->Release();
         m_per_draw_cb = nullptr;
     }
-    if (m_dynamic_position_vb)
-    {
-        m_dynamic_position_vb->Release();
-        m_dynamic_position_vb = nullptr;
-    }
-    m_dynamic_position_capacity = 0;
     m_ref_ps_mask = nullptr;
     m_ref_vs_skinned = nullptr;
     m_ref_vs_static = nullptr;
     release_layouts();
-}
-
-bool MaskGeometryPass::ensure_dynamic_position_vb(REX::W32::ID3D11Device* device, uint32_t vertex_count)
-{
-    if (m_dynamic_position_vb && vertex_count <= m_dynamic_position_capacity)
-        return true;
-
-    // Capacity growth: at least 4096 vertices (64 KB), double the current, always fit the request.
-    uint32_t const needed = std::max(std::max(4096u, m_dynamic_position_capacity * 2u), vertex_count);
-
-    REX::W32::D3D11_BUFFER_DESC bd{};
-    bd.usage = REX::W32::D3D11_USAGE_DYNAMIC;
-    bd.byteWidth = needed * 16u;  // one float4 position per vertex
-    bd.bindFlags = REX::W32::D3D11_BIND_VERTEX_BUFFER;
-    bd.cpuAccessFlags = REX::W32::D3D11_CPU_ACCESS_WRITE;
-
-    REX::W32::ID3D11Buffer* buffer = nullptr;
-    REX::W32::HRESULT const hr = device->CreateBuffer(&bd, nullptr, &buffer);
-    if (!REX::W32::SUCCESS(hr) || !buffer)
-    {
-        logger::error("Mask overlay: failed to create the dynamic position scratch buffer ({:X}), affected meshes skipped",
-            static_cast<unsigned int>(hr));
-        return false;
-    }
-
-    if (m_dynamic_position_vb)
-        m_dynamic_position_vb->Release();
-    m_dynamic_position_vb = buffer;
-    m_dynamic_position_capacity = needed;
-    return true;
 }
 
 void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> render_geometries)
@@ -386,7 +348,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
             continue;
 
         bool const skinned = draw.skin ? true : false;
-        bool const separate_position = draw.dynamic_positions != nullptr;
+        bool const separate_position = draw.position_buffer != nullptr;
 
         // Skinned geometries pass the calibrated layout; static geometries pass nullptr (behaviour exactly as before)
         ShaderManager& shaders = ShaderManager::instance();
@@ -508,48 +470,12 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
 
         if (separate_position)
         {
-            // Positionless dynamic draws: slot 0 = the scratch buffer rebuilt each draw from the
-            // geometry's dynamicData positions (identity copy over position_count original
-            // vertices; when the partition is a packed subset, the first vertex_count entries are
-            // additionally remapped through its vertexMap), slot 1 = the partition vertex buffer
-            // (skin data). The scratch stream then covers every index the partition index buffer
-            // can reference.
-            if (!ensure_dynamic_position_vb(device, draw.position_count))
-                continue;
-
-            REX::W32::D3D11_MAPPED_SUBRESOURCE position_mapped{};
-            if (!REX::W32::SUCCESS(context->Map(m_dynamic_position_vb, 0, REX::W32::D3D11_MAP_WRITE_DISCARD, 0, &position_mapped)))
-                continue;
-            {
-                float const* const source = static_cast<float const*>(draw.dynamic_positions);
-                uint16_t const* const vertex_map = draw.vertex_map;
-                float* const target = static_cast<float*>(position_mapped.data);
-                uint32_t const fill_count = std::min(draw.position_count, m_dynamic_position_capacity);
-                for (uint32_t v = 0; v < fill_count; ++v)
-                {
-                    float const* const src = source + static_cast<size_t>(v) * 4u;
-                    float* const dst = target + static_cast<size_t>(v) * 4u;
-                    dst[0] = src[0];
-                    dst[1] = src[1];
-                    dst[2] = src[2];
-                    dst[3] = 1.0f;
-                }
-                if (vertex_map)
-                {
-                    for (uint32_t v = 0; v < draw.vertex_count; ++v)
-                    {
-                        float const* const src = source + static_cast<size_t>(vertex_map[v]) * 4u;
-                        float* const dst = target + static_cast<size_t>(v) * 4u;
-                        dst[0] = src[0];
-                        dst[1] = src[1];
-                        dst[2] = src[2];
-                        dst[3] = 1.0f;
-                    }
-                }
-            }
-            context->Unmap(m_dynamic_position_vb, 0);
-
-            REX::W32::ID3D11Buffer* const streams[2] = { m_dynamic_position_vb, draw.vertex_buffer };
+            // Positionless dynamic draws: slot 0 = the geometry's cached position stream (baked
+            // once at collection time from dynamicData, see RenderGeometry::position_buffer),
+            // slot 1 = the partition vertex buffer (skin data). The stream covers every index
+            // the partition index buffer can reference (identity for whole-mesh index space,
+            // vertexMap-remapped for packed partitions).
+            REX::W32::ID3D11Buffer* const streams[2] = { draw.position_buffer, draw.vertex_buffer };
             uint32_t const strides[2] = { 16u, draw.vertex_stride };
             uint32_t const offsets[2] = { 0u, 0u };
             context->IASetVertexBuffers(0, 2, streams, strides, offsets);

@@ -62,8 +62,14 @@ PLUGIN_NAMESPACE_BEGIN
 //
 // Lifetime: the cached RenderGeometry NiPointers keep VB/IB (and skin/node)
 // alive while cached; eviction drops the last reference in a same-thread
-// refcount decrement. Pointers handed out by lookup stay valid until the next
-// cache mutation.
+// refcount decrement. The positionless geometry's position_stream buffers are
+// device objects owned by the entry: every path that destroys an entry
+// (erase, eviction) releases them while the device is alive. Per-frame copies
+// of RenderGeometry borrow them and never release. The cache destructor does
+// NOT release them - it runs at process-exit teardown ordering where the
+// device may already be gone (the same convention as the overlay singletons);
+// the OS reclaims what remains. Pointers handed out by lookup stay valid until
+// the next cache mutation.
 // ---------------------------------------------------------------------------
 class RenderGeometryCache
 {
@@ -134,6 +140,12 @@ private:
 private:
     RenderGeometryCache();
     ~RenderGeometryCache();
+
+    // Releases the device objects owned by a dying entry's geometries (the positionless
+    // geometry's position_stream buffers; see RenderGeometry::position_buffer). Render-thread
+    // only, reached from erase and eviction - both run while the device is alive. Per-frame
+    // copies of RenderGeometry borrow these pointers and never release them.
+    static void release_position_buffers(std::vector<RenderGeometry> const& geometries);
 
     // Main-thread posting target of EquipSink: the ONLY shared state between the threads. Posts
     // past the cap are dropped (see Max_Equip_Inbox in the cpp).

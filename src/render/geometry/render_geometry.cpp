@@ -1000,7 +1000,7 @@ namespace
         }
     }
 
-    void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, std::vector<RenderGeometry>& render_geometries)
+    void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, REX::W32::ID3D11Device* device, std::vector<RenderGeometry>& render_geometries)
     {
         char const* const node_name = geom->name.c_str();
         char const* const rtti_name = geom->GetRTTI() ? geom->GetRTTI()->GetName() : "?";
@@ -1127,12 +1127,12 @@ namespace
             // ---- Positionless partition (partition desc without VF_VERTEX, FaceGen-family dynamic
             // meshes: head, eyes, hair...): the partition buffer holds only UV/normal/tangent/color
             // and the contiguous SKINNING block (weights f16x4 at the desc's skin offset, indices
-            // u8x4 right after). The engine keeps no source vertex buffer for skinned geometry, so
-            // the partition buffers are the only skin-data source; positions are rebuilt at draw
-            // time from dynamicData through the partition's vertexMap (partition-local → original
-            // index; null = identity) into a scratch stream, which keeps partition-local indexing
-            // of the scratch stream, the partition vertex buffer and the partition index buffer
-            // consistent. ----
+            // u8x4 right after). The engine keeps no source vertex buffer for skinned geometry (in
+            // fact no source rendererData at all), so the partition buffers are the only skin-data
+            // source; positions are rebuilt from dynamicData through the partition's vertexMap
+            // (partition-local → original index; null = identity) into a dedicated GPU stream
+            // baked once per collection, which keeps the index space of the position stream, the
+            // partition vertex buffer and the partition index buffer consistent. ----
             if (!buff->vertexDesc.HasFlag(RE::BSGraphics::Vertex::VF_VERTEX))
             {
                 if (!dynamic_positions)
@@ -1185,8 +1185,8 @@ namespace
                 // ---- Index space detection: engine partition buffers may keep original
                 // (whole-mesh) vertex indexing or be packed subsets. An index-buffer value at or
                 // above part.vertices proves original indexing - the position stream is then a
-                // straight identity copy of dynamicData (any smaller fill leaves the higher
-                // indices fetching stale scratch content, which renders as huge garbage
+                // straight identity copy of dynamicData (any smaller bake leaves the higher
+                // indices fetching past the baked positions, which renders as huge garbage
                 // triangles). Otherwise the partition is packed and its vertexMap (when present)
                 // remaps the first part.vertices vertices. ----
                 uint32_t max_index = 0;
@@ -1239,6 +1239,45 @@ namespace
                 if (!positions_usable)
                     continue;
 
+                // ---- Bake the position stream once at collection time: corpses are static
+                // (dynamicData no longer changes after death), so the remapped positions go into
+                // a dedicated immutable GPU buffer owned by the geometry cache entry instead of
+                // being re-uploaded through a scratch buffer every frame. Identity copy over the
+                // reachable range, then the vertexMap overwrite for packed partitions. ----
+                std::vector<float> rebuilt(static_cast<size_t>(reachable_count) * 4u);
+                for (uint32_t v = 0; v < reachable_count; ++v)
+                {
+                    rebuilt[static_cast<size_t>(v) * 4u + 0u] = positions[static_cast<size_t>(v) * 4u + 0u];
+                    rebuilt[static_cast<size_t>(v) * 4u + 1u] = positions[static_cast<size_t>(v) * 4u + 1u];
+                    rebuilt[static_cast<size_t>(v) * 4u + 2u] = positions[static_cast<size_t>(v) * 4u + 2u];
+                    rebuilt[static_cast<size_t>(v) * 4u + 3u] = 1.0f;
+                }
+                if (vertex_map)
+                {
+                    for (uint32_t v = 0; v < part.vertices; ++v)
+                    {
+                        float const* const src = positions + static_cast<size_t>(vertex_map[v]) * 4u;
+                        rebuilt[static_cast<size_t>(v) * 4u + 0u] = src[0];
+                        rebuilt[static_cast<size_t>(v) * 4u + 1u] = src[1];
+                        rebuilt[static_cast<size_t>(v) * 4u + 2u] = src[2];
+                    }
+                }
+
+                REX::W32::D3D11_BUFFER_DESC position_bd{};
+                position_bd.usage = REX::W32::D3D11_USAGE_IMMUTABLE;
+                position_bd.byteWidth = static_cast<uint32_t>(rebuilt.size() * sizeof(float));
+                position_bd.bindFlags = REX::W32::D3D11_BIND_VERTEX_BUFFER;
+                REX::W32::D3D11_SUBRESOURCE_DATA position_init{};
+                position_init.sysMem = rebuilt.data();
+                REX::W32::ID3D11Buffer* position_buffer = nullptr;
+                REX::W32::HRESULT const position_hr = device->CreateBuffer(&position_bd, &position_init, &position_buffer);
+                if (!REX::W32::SUCCESS(position_hr) || !position_buffer)
+                {
+                    logger::error("Mask overlay: failed to create the position stream buffer ({:X}), affected meshes skipped",
+                        static_cast<unsigned int>(position_hr));
+                    continue;
+                }
+
                 RenderGeometry draw{};
                 draw.skin = geom_rt.skinInstance;
                 draw.partition = p;
@@ -1253,9 +1292,7 @@ namespace
                 draw.position_format = REX::W32::DXGI_FORMAT_R32G32B32_FLOAT;
                 draw.position_offset = 0u;
                 draw.skin_layout = SkinLayout{ REX::W32::DXGI_FORMAT_R16G16B16A16_FLOAT, skin_offset, REX::W32::DXGI_FORMAT_R8G8B8A8_UINT, skin_offset + 8u };
-                draw.dynamic_positions = dynamic_positions;
-                draw.vertex_map = vertex_map;
-                draw.position_count = reachable_count;
+                draw.position_buffer = position_buffer;
                 render_geometries.push_back(std::move(draw));
                 continue;
             }
@@ -1359,7 +1396,7 @@ namespace
     }
 
 
-    void collect_geometry(RE::BSGeometry* geom, TargetContext const& target, std::vector<RenderGeometry>& render_geometries)
+    void collect_geometry(RE::BSGeometry* geom, TargetContext const& target, REX::W32::ID3D11Device* device, std::vector<RenderGeometry>& render_geometries)
     {
         switch (geom->GetType().get())
         {
@@ -1386,13 +1423,14 @@ namespace
         }
 
         if (geom_rt.skinInstance)
-            collect_skinned(geom, geom_rt, render_geometries);
+            collect_skinned(geom, geom_rt, device, render_geometries);
         else
             collect_static(geom, geom_rt, target, render_geometries);
     }
 }
 
-void collect_render_geometries(RE::TESObjectREFR const* ref, std::vector<RenderGeometry>& render_geometries) {
+void collect_render_geometries(RE::TESObjectREFR const* ref, REX::W32::ID3D11Device* device, std::vector<RenderGeometry>& render_geometries)
+{
     if (!ref)
         return;
 
@@ -1419,7 +1457,7 @@ void collect_render_geometries(RE::TESObjectREFR const* ref, std::vector<RenderG
 
     RE::BSVisit::TraverseScenegraphGeometries(root, [&](RE::BSGeometry* geom)
     {
-        collect_geometry(geom, target_ctx, render_geometries);
+        collect_geometry(geom, target_ctx, device, render_geometries);
         return RE::BSVisit::BSVisitControl::kContinue;
     });
 }
