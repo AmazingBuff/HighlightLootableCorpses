@@ -952,10 +952,60 @@ namespace
         render_geometries.push_back(std::move(draw));
     }
 
+    // ---------------------------------------------------------------------------
+    // Source GPU buffer availability of skinned geometry. Skinned draws come exclusively from
+    // the NiSkinPartition partition buffers; the geometry's own rendererData buffers are not part
+    // of the skinned draw path, and the engine does not keep them for every mesh family (the
+    // FaceGen-family dynamic head parts have none - measured via the failed whole-mesh attempt).
+    // Recorded here so future work never assumes source GPU buffers exist for skinned geometry:
+    // a DEBUG line logs every geometry, an INFO line logs each distinct availability state once
+    // (bounded, visible at the default log level).
+    // ---------------------------------------------------------------------------
+    void log_skinned_source_buffers(RE::BSGeometry const* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt)
+    {
+        char const* const node_name = geom->name.c_str();
+        char const* const rtti_name = geom->GetRTTI() ? geom->GetRTTI()->GetName() : "?";
+        RE::BSGraphics::TriShape const* const source = geom_rt.rendererData;
+        bool const has_position = geom_rt.vertexDesc.HasFlag(RE::BSGraphics::Vertex::VF_VERTEX);
+        bool const has_renderer_data = source != nullptr;
+        bool const has_vb = source && source->vertexBuffer != nullptr;
+        bool const has_ib = source && source->indexBuffer != nullptr;
+        bool const has_raw = source && source->rawVertexData != nullptr;
+
+        logger::debug("Mask overlay: skinned source buffers pos={} renderer_data={} vb={} ib={} raw={} desc={:#06x} node={} rtti={}",
+            has_position ? "yes" : "NO",
+            has_renderer_data ? "yes" : "NO",
+            has_vb ? "yes" : "NO",
+            has_ib ? "yes" : "NO",
+            has_raw ? "yes" : "no",
+            static_cast<unsigned>(geom_rt.vertexDesc.GetFlags()),
+            node_name ? node_name : "?",
+            rtti_name ? rtti_name : "?");
+
+        unsigned const state = (has_position ? 1u : 0u) | (has_renderer_data ? 2u : 0u) |
+            (has_vb ? 4u : 0u) | (has_ib ? 8u : 0u) | (has_raw ? 16u : 0u);
+        static std::unordered_set<unsigned> s_logged_states;
+        if (s_logged_states.insert(state).second)
+        {
+            logger::info("Mask overlay: skinned source buffer state {:#04x} (pos={} renderer_data={} vb={} ib={} raw={}) first seen on node={} rtti={}"
+                " - skinned draws come from partition buffers; source GPU buffers differ by mesh family and must not be assumed present",
+                state,
+                has_position ? "yes" : "NO",
+                has_renderer_data ? "yes" : "NO",
+                has_vb ? "yes" : "NO",
+                has_ib ? "yes" : "NO",
+                has_raw ? "yes" : "no",
+                node_name ? node_name : "?",
+                rtti_name ? rtti_name : "?");
+        }
+    }
+
     void collect_skinned(RE::BSGeometry* geom, RE::BSGeometry::GEOMETRY_RUNTIME_DATA const& geom_rt, std::vector<RenderGeometry>& render_geometries)
     {
         char const* const node_name = geom->name.c_str();
         char const* const rtti_name = geom->GetRTTI() ? geom->GetRTTI()->GetName() : "?";
+
+        log_skinned_source_buffers(geom, geom_rt);
 
         RE::NiSkinInstance* skin = geom_rt.skinInstance.get();
         RE::NiSkinPartition* skin_partition = skin ? skin->skinPartition.get() : nullptr;
