@@ -183,6 +183,24 @@ bool Menu::is_menu_open()
     return SKSEMenuFramework::IsInstalled() && SKSEMenuFramework::IsAnyBlockingWindowOpened();
 }
 
+uint32_t macro_key_code(RE::ButtonEvent const& event, uint32_t& out)
+{
+    switch (event.device.get())
+    {
+    case RE::INPUT_DEVICE::kKeyboard:
+        out = event.idCode;
+        return true;
+    case RE::INPUT_DEVICE::kMouse:
+        out = SKSE::InputMap::kMacro_MouseButtonOffset + event.idCode;
+        return true;
+    case RE::INPUT_DEVICE::kGamepad:
+        out = SKSE::InputMap::kMacro_GamepadOffset + SKSE::InputMap::GamepadMaskToKeycode(event.idCode);
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool Menu::is_rebinding() const
 {
     return m_rebinding;
@@ -209,6 +227,28 @@ void Menu::rebind(RE::ButtonEvent const& event, uint32_t macro_key)
     m_rebinding = false;
 }
 
+bool __stdcall Menu::on_framework_input(RE::InputEvent* event)
+{
+    // The framework freezes engine input while one of its windows is open, so the capture is fed
+    // through this hook instead of the engine sink. While the capture is active every key press
+    // is consumed (ESC included - it binds instead of closing the panel); anything else passes
+    // through to the framework untouched.
+    Menu& menu = instance();
+    if (!menu.is_rebinding() || !event)
+        return false;
+
+    if (RE::ButtonEvent const* const button = event->AsButtonEvent())
+    {
+        uint32_t key = 0;
+        if (macro_key_code(*button, key))
+        {
+            menu.rebind(*button, key);
+            return true;
+        }
+    }
+    return false;
+}
+
 void Menu::register_menu()
 {
     static bool s_registered = false;
@@ -227,6 +267,10 @@ void Menu::register_menu()
     SKSEMenuFramework::AddSectionItem("Display", render_display);
     SKSEMenuFramework::AddSectionItem("LootFilter", render_loot_filter);
     SKSEMenuFramework::AddSectionItem("Stat", render_stat);
+    // The framework freezes engine input while one of its windows is open - the rebinding
+    // capture is fed through the framework's own input hook (the returned registration handle
+    // is intentionally kept for the plugin's lifetime, like every other registration here).
+    SKSEMenuFramework::AddInputEvent(&Menu::on_framework_input);
     s_registered = true;
 
     logger::info("Registered settings pages (General, Display, LootFilter, Stat; SKSE Menu Framework v{:.2f})",

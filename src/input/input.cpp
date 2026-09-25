@@ -8,40 +8,15 @@ PLUGIN_NAMESPACE_BEGIN
 
 namespace
 {
-    // SKSE macro code of a button event: keyboard (DIK), then mouse buttons/wheel and gamepad
-    // (SKSE::InputMap offsets). cfg.hotkey is stored in this same space, so the trigger and the
-    // MCP rebinding capture compare raw macro codes with no per-device translation.
-    uint32_t macro_key_code(RE::ButtonEvent const& event, uint32_t& out)
-    {
-        switch (event.device.get())
-        {
-        case RE::INPUT_DEVICE::kKeyboard:
-            out = event.idCode;
-            return true;
-        case RE::INPUT_DEVICE::kMouse:
-            out = SKSE::InputMap::kMacro_MouseButtonOffset + event.idCode;
-            return true;
-        case RE::INPUT_DEVICE::kGamepad:
-            out = SKSE::InputMap::kMacro_GamepadOffset + SKSE::InputMap::GamepadMaskToKeycode(event.idCode);
-            return true;
-        default:
-            return false;
-        }
-    }
-
     void button_event(RE::ButtonEvent* event)
     {
         uint32_t key = 0;
         if (!macro_key_code(*event, key))
             return;
 
-        // While the MCP menu is open the rebinding capture consumes key presses (ESC may close
-        // the panel, but the sink sees the down event first and the bind still applies).
-        if (Menu::instance().is_menu_open())
-        {
-            Menu::instance().rebind(*event, key);
-            return;
-        }
+        // While an MCP window is open the framework freezes engine input, so this sink receives
+        // nothing and the rebinding capture is fed through the framework's own input hook
+        // (Menu::on_framework_input) instead - there is nothing to do here behind that branch.
 
         if (uint32_t const hotkey = Setting::instance().get_config().hotkey)
         {
