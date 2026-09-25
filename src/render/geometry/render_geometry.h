@@ -68,7 +68,7 @@ struct RenderGeometry
     // UV/normal/tangent/color and the SKINNING block; model-space positions live in
     // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex). At collection time the
     // position stream is rebuilt (identity for whole-mesh index space, vertexMap-remapped for
-    // packed subsets) into this dedicated float4-per-vertex GPU buffer. Corpses are static
+    // packed subsets) into this dedicated GPU buffer. Corpses are static
     // (dynamicData no longer changes after death), so the stream is uploaded once per collection
     // and bound directly, instead of being re-uploaded through a scratch buffer every frame.
     // Ownership: created by collect_render_geometries on the render thread; owned by the
@@ -76,6 +76,7 @@ struct RenderGeometry
     // copies of RenderGeometry borrow the pointer and must never release it. Null for the
     // standard single-stream paths (slot 0 then carries positions inside vertex_buffer).
     REX::W32::ID3D11Buffer* position_buffer;
+    uint32_t position_stride;  // byte stride of one position-stream vertex (float4 = 16 bytes); like position_buffer, meaningful only when it is set
 };
 
 // Collect one run's render geometries from the mask targets along two paths, static (the

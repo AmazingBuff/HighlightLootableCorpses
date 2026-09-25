@@ -476,7 +476,7 @@ void MaskGeometryPass::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11Devi
             // the partition index buffer can reference (identity for whole-mesh index space,
             // vertexMap-remapped for packed partitions).
             REX::W32::ID3D11Buffer* const streams[2] = { draw.position_buffer, draw.vertex_buffer };
-            uint32_t const strides[2] = { 16u, draw.vertex_stride };
+            uint32_t const strides[2] = { draw.position_stride, draw.vertex_stride };
             uint32_t const offsets[2] = { 0u, 0u };
             context->IASetVertexBuffers(0, 2, streams, strides, offsets);
         }

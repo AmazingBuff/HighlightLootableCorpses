@@ -401,6 +401,21 @@ namespace
         return &Skinning_Layouts[0];
     }
 
+    // Layout constants of the positionless (FaceGen-family) SKINNING block: the engine stores four
+    // float16 blend weights immediately followed by four uint8 bone indices, contiguous at the
+    // vertex desc's SKINNING offset and ending at the desc's vertex size. This is layout 1 of the
+    // Skinning_Layouts table above; the weight side comes from that table entry, only the index
+    // quad size and the derived block total are named here.
+    constexpr uint8_t Dynamic_Skin_Layout_Id = 1;
+    constexpr uint32_t Dynamic_Skin_Index_Bytes = 4u;  // 4 × uint8 bone indices (R8G8B8A8_UINT)
+    constexpr uint32_t Dynamic_Skin_Block_Bytes = Skinning_Layouts[0].weight_bytes + Dynamic_Skin_Index_Bytes;
+
+    // Rebuilt position stream format (see RenderGeometry::position_buffer): one float4 per
+    // original vertex - xyz is the model-space position, w is unused padding written as 1.0 -
+    // bound as its own vertex stream with Position_Stride bytes per vertex.
+    constexpr uint32_t Position_Stride = 16u;     // bytes per stream vertex (4 × float32)
+    constexpr uint32_t Position_Components = 4u;  // float components per stream vertex
+
     // Per-mesh validation statistics: produced by a full vertex traversal over each mesh's own data;
     // indices are interpreted as global bone indices bounded by the palette length
     struct SkinnedMeshStats
@@ -1066,17 +1081,17 @@ namespace
 
         // ---- Position source for positionless partitions (FaceGen-family dynamic meshes): the
         // partition buffers carry no positions; model-space positions live in
-        // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex), mapped per partition
-        // through the partition's vertexMap at draw time. Resolved once per geometry. ----
+        // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex), baked per partition
+        // into a cached position stream at collection time. Resolved once per geometry. ----
         void const* dynamic_positions = nullptr;
         uint32_t dynamic_vertex_capacity = 0;
         if (RE::BSDynamicTriShape* dyn = geom->AsDynamicTriShape())
         {
             RE::BSDynamicTriShape::DYNAMIC_TRISHAPE_RUNTIME_DATA const& dyn_rt = dyn->GetDynamicTrishapeRuntimeData();
-            if (dyn_rt.dynamicData && dyn_rt.dataSize >= 16u)
+            if (dyn_rt.dynamicData && dyn_rt.dataSize >= Position_Stride)
             {
                 dynamic_positions = dyn_rt.dynamicData;
-                dynamic_vertex_capacity = dyn_rt.dataSize / 16u;
+                dynamic_vertex_capacity = dyn_rt.dataSize / Position_Stride;
             }
         }
 
@@ -1144,7 +1159,7 @@ namespace
 
                 uint32_t const vertex_stride = vertex_size_of(buff->vertexDesc);
                 uint32_t const skin_offset = buff->vertexDesc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_SKINNING);
-                if (vertex_stride == 0 || skin_offset + 12u > vertex_stride)
+                if (vertex_stride == 0 || skin_offset + Dynamic_Skin_Block_Bytes > vertex_stride)
                 {
                     logger::warn("Mask overlay: skip skinned draw [skin block does not fit the positionless partition layout] node={} partition={} skin_offset={} stride={}",
                         node_name, p, skin_offset, vertex_stride);
@@ -1160,12 +1175,13 @@ namespace
                 }
 
                 // Weights/indices validation on the partition's own data (positions are not in this
-                // buffer); the layout inside the SKINNING block is fixed by construction.
-                SkinningLayoutSpec const spec{ 1, REX::W32::DXGI_FORMAT_R16G16B16A16_FLOAT, 8u, 0u, REX::W32::DXGI_FORMAT_R8G8B8A8_UINT, 8u };
+                // buffer); the layout inside the SKINNING block is fixed by construction (see the
+                // Dynamic_Skin_* constants).
+                SkinningLayoutSpec const& spec = *find_skinning_layout(Dynamic_Skin_Layout_Id);
                 SkinnedMeshStats stats{ .position_finite = true };
                 SkinnedMeshVerdict const verdict = validate_skinned_mesh(
                     raw, vertex_stride, 0u, 0u, spec,
-                    skin_offset, skin_offset + 8u,
+                    skin_offset + spec.weight_delta, skin_offset + spec.index_delta,
                     part.vertices, palette_count, stats, false);
                 if (verdict == SkinnedMeshVerdict::e_weights_bad)
                 {
@@ -1213,7 +1229,7 @@ namespace
                 bool positions_usable = true;
                 for (uint32_t v = 0; v < reachable_count; v += sample_step)
                 {
-                    float const* const src_pos = positions + static_cast<size_t>(v) * 4u;
+                    float const* const src_pos = positions + static_cast<size_t>(v) * Position_Components;
                     if (!std::isfinite(src_pos[0]) || !std::isfinite(src_pos[1]) || !std::isfinite(src_pos[2]))
                     {
                         logger::warn("Mask overlay: skip skinned draw [dynamic positions non-finite] node={} partition={} vertex={}",
@@ -1244,28 +1260,31 @@ namespace
                 // a dedicated immutable GPU buffer owned by the geometry cache entry instead of
                 // being re-uploaded through a scratch buffer every frame. Identity copy over the
                 // reachable range, then the vertexMap overwrite for packed partitions. ----
-                std::vector<float> rebuilt(static_cast<size_t>(reachable_count) * 4u);
+                std::vector<float> rebuilt(static_cast<size_t>(reachable_count) * Position_Components);
                 for (uint32_t v = 0; v < reachable_count; ++v)
                 {
-                    rebuilt[static_cast<size_t>(v) * 4u + 0u] = positions[static_cast<size_t>(v) * 4u + 0u];
-                    rebuilt[static_cast<size_t>(v) * 4u + 1u] = positions[static_cast<size_t>(v) * 4u + 1u];
-                    rebuilt[static_cast<size_t>(v) * 4u + 2u] = positions[static_cast<size_t>(v) * 4u + 2u];
-                    rebuilt[static_cast<size_t>(v) * 4u + 3u] = 1.0f;
+                    float const* const src = positions + static_cast<size_t>(v) * Position_Components;
+                    float* const dst = rebuilt.data() + static_cast<size_t>(v) * Position_Components;
+                    dst[0] = src[0];
+                    dst[1] = src[1];
+                    dst[2] = src[2];
+                    dst[3] = 1.0f;  // w: unused by the float3 POSITION fetch, kept at identity
                 }
                 if (vertex_map)
                 {
                     for (uint32_t v = 0; v < part.vertices; ++v)
                     {
-                        float const* const src = positions + static_cast<size_t>(vertex_map[v]) * 4u;
-                        rebuilt[static_cast<size_t>(v) * 4u + 0u] = src[0];
-                        rebuilt[static_cast<size_t>(v) * 4u + 1u] = src[1];
-                        rebuilt[static_cast<size_t>(v) * 4u + 2u] = src[2];
+                        float const* const src = positions + static_cast<size_t>(vertex_map[v]) * Position_Components;
+                        float* const dst = rebuilt.data() + static_cast<size_t>(v) * Position_Components;
+                        dst[0] = src[0];
+                        dst[1] = src[1];
+                        dst[2] = src[2];
                     }
                 }
 
                 REX::W32::D3D11_BUFFER_DESC position_bd{};
                 position_bd.usage = REX::W32::D3D11_USAGE_IMMUTABLE;
-                position_bd.byteWidth = static_cast<uint32_t>(rebuilt.size() * sizeof(float));
+                position_bd.byteWidth = static_cast<uint32_t>(reachable_count * Position_Stride);
                 position_bd.bindFlags = REX::W32::D3D11_BIND_VERTEX_BUFFER;
                 REX::W32::D3D11_SUBRESOURCE_DATA position_init{};
                 position_init.sysMem = rebuilt.data();
@@ -1291,8 +1310,9 @@ namespace
                 draw.index_count = static_cast<uint32_t>(part.triangles) * 3u;
                 draw.position_format = REX::W32::DXGI_FORMAT_R32G32B32_FLOAT;
                 draw.position_offset = 0u;
-                draw.skin_layout = SkinLayout{ REX::W32::DXGI_FORMAT_R16G16B16A16_FLOAT, skin_offset, REX::W32::DXGI_FORMAT_R8G8B8A8_UINT, skin_offset + 8u };
+                draw.skin_layout = SkinLayout{ spec.weight_format, skin_offset + spec.weight_delta, spec.index_format, skin_offset + spec.index_delta };
                 draw.position_buffer = position_buffer;
+                draw.position_stride = Position_Stride;
                 render_geometries.push_back(std::move(draw));
                 continue;
             }
