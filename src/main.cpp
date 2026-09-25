@@ -37,7 +37,7 @@ namespace
             (void)PLUGIN_NAMESPACE::ShaderManager::instance().compile();
             PLUGIN_NAMESPACE::Renderer::install();
             PLUGIN_NAMESPACE::InputManager::install();
-            PLUGIN_NAMESPACE::Menu::register_menu();
+            PLUGIN_NAMESPACE::Menu::instance().register_menu();
             break;
         case SKSE::MessagingInterface::kSaveGame:
             PLUGIN_NAMESPACE::Setting::instance().save();

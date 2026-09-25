@@ -37,9 +37,9 @@ namespace
 
         // While the MCP menu is open the rebinding capture consumes key presses (ESC may close
         // the panel, but the sink sees the down event first and the bind still applies).
-        if (Menu::is_menu_open())
+        if (Menu::instance().is_menu_open())
         {
-            Menu::feed_rebind(*event, key);
+            Menu::instance().rebind(*event, key);
             return;
         }
 

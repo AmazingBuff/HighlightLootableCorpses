@@ -18,8 +18,7 @@ namespace
     // Hotkey rebinding state: active while the General page shows "Press any key...". The
     // capture ends on the first accepted key press (Menu::feed_rebind) or after the timeout.
     constexpr std::chrono::milliseconds Rebind_Timeout{5000};
-    bool s_rebinding = false;
-    std::chrono::steady_clock::time_point s_rebind_start{};
+
 
     // Display name of a stored hotkey: cfg.hotkey lives in the SKSE macro code space (keyboard
     // DIK, then mouse buttons/wheel and gamepad), which GetKeyName dispatches by range.
@@ -56,10 +55,10 @@ namespace
 
         ImGuiMCP::Checkbox("Enabled", &cfg.enabled);
 
-        Menu::update_rebinding();
-        std::string const label = Menu::is_rebinding() ? std::string("Press any key...") : fmt::format("Hotkey: {}", hotkey_name(cfg.hotkey));
+        Menu::instance().update_rebinding();
+        std::string const label = Menu::instance().is_rebinding() ? std::string("Press any key...") : fmt::format("Hotkey: {}", hotkey_name(cfg.hotkey));
         if (ImGuiMCP::Button(label.c_str()))
-            Menu::toggle_rebinding();
+            Menu::instance().toggle_rebinding();
 
         size_t hk_index = static_cast<size_t>(cfg.hotkey_mode);
         if (ImGuiMCP::Button(fmt::format("Hotkey Mode: {}", s_hotkey_mode_names[hk_index]).c_str()))
@@ -171,49 +170,43 @@ namespace
         if (ImGuiMCP::Button("Save"))
             Setting::instance().save();
     }
-}
+} // namespace
 
+Menu &Menu::instance()
+{
+    static Menu s_instance;
+    return s_instance;
+}
 
 bool Menu::is_menu_open()
 {
     return SKSEMenuFramework::IsInstalled() && SKSEMenuFramework::IsAnyBlockingWindowOpened();
 }
 
-bool Menu::is_rebinding()
+bool Menu::is_rebinding() const
 {
-    return s_rebinding;
+    return m_rebinding;
 }
 
 void Menu::toggle_rebinding()
 {
-    s_rebinding = !s_rebinding;
-    s_rebind_start = std::chrono::steady_clock::now();
+    m_rebinding = !m_rebinding;
+    m_rebind_start = std::chrono::steady_clock::now();
 }
 
 void Menu::update_rebinding()
 {
-    if (s_rebinding && std::chrono::steady_clock::now() - s_rebind_start > Rebind_Timeout)
-        s_rebinding = false;
+    if (m_rebinding && std::chrono::steady_clock::now() - m_rebind_start > Rebind_Timeout)
+        m_rebinding = false;
 }
 
-void Menu::feed_rebind(RE::ButtonEvent const& event, uint32_t macro_key)
+void Menu::rebind(RE::ButtonEvent const& event, uint32_t macro_key)
 {
-    if (!s_rebinding || !event.IsDown() || macro_key == 0)
+    if (!m_rebinding || !event.IsDown() || macro_key == 0)
         return;
 
-    // Presses over the framework panel stay with imgui (clicking the hotkey button again
-    // cancels instead of binding); presses outside the panel - and every keyboard/gamepad
-    // press - bind. ESC may close the panel, but the sink sees the down event first and the
-    // bind still applies.
-    if (event.device.get() == RE::INPUT_DEVICE::kMouse)
-    {
-        ImGuiMCP::ImGuiIO* const io = ImGuiMCP::GetIO();
-        if (io && io->WantCaptureMouse)
-            return;
-    }
-
     Setting::instance().get_config().hotkey = macro_key;
-    s_rebinding = false;
+    m_rebinding = false;
 }
 
 void Menu::register_menu()
@@ -239,5 +232,9 @@ void Menu::register_menu()
     logger::info("Registered settings pages (General, Display, LootFilter, Stat; SKSE Menu Framework v{:.2f})",
         SKSEMenuFramework::GetMenuFrameworkVersion());
 }
+
+Menu::Menu() : m_rebinding(false) {}
+
+Menu::~Menu() = default;
 
 PLUGIN_NAMESPACE_END
