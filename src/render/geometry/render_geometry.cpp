@@ -464,19 +464,25 @@ namespace
     // Traverse all vertices under the given position and SKINNING layout, fill in the statistics
     // and return the verdict. Indices are global bone indices with index_bound (the palette length
     // palette) as the out-of-range bound; the caller guarantees every read stays within the stride.
+    // buffer_has_positions == false (positionless dynamic layouts, positions live in dynamicData)
+    // skips the position decode and leaves the position stats untouched.
     SkinnedMeshVerdict validate_skinned_mesh(
         uint8_t const* raw, uint32_t stride, uint32_t pos_offset, uint32_t pos_bytes,
         SkinningLayoutSpec const& spec, uint32_t weight_offset, uint32_t index_offset,
-        uint32_t vertex_count, uint32_t index_bound, SkinnedMeshStats& stats)
+        uint32_t vertex_count, uint32_t index_bound, SkinnedMeshStats& stats,
+        bool buffer_has_positions)
     {
         stats = SkinnedMeshStats{ .position_finite = true };
         stats.index_min = 0xFFFFFFFFu;  // start from a sentinel and take the min over the indices (vertex count > 0 is guaranteed by the caller)
         bool first_sample = true;
         for (uint32_t v = 0; v < vertex_count; ++v)
         {
-            RE::NiPoint3 p{};
-            if (!decode_position(raw, stride, pos_offset, pos_bytes, v, p))
-                stats.position_finite = false;
+            if (buffer_has_positions)
+            {
+                RE::NiPoint3 p{};
+                if (!decode_position(raw, stride, pos_offset, pos_bytes, v, p))
+                    stats.position_finite = false;
+            }
 
             uint8_t const* const base = raw + static_cast<size_t>(v) * stride;
             float w[4]{};
@@ -640,7 +646,7 @@ namespace
                 {
                     SkinnedMeshVerdict const verdict = validate_skinned_mesh(
                         raw, stride, pos_offset, pos_bytes, spec, weight_offset, index_offset,
-                        vertex_count, index_bound, cr.stats);
+                        vertex_count, index_bound, cr.stats, true);
                     // An out-of-range index does not affect the candidate passing (the complete palette upload performed by the mask draw covers it)
                     cr.passed = verdict == SkinnedMeshVerdict::e_ok;
                 }
@@ -1008,6 +1014,22 @@ namespace
             return;
         }
 
+        // ---- Position source for positionless partitions (FaceGen-family dynamic meshes): the
+        // partition buffers carry no positions; model-space positions live in
+        // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex), mapped per partition
+        // through the partition's vertexMap at draw time. Resolved once per geometry. ----
+        void const* dynamic_positions = nullptr;
+        uint32_t dynamic_vertex_capacity = 0;
+        if (RE::BSDynamicTriShape* dyn = geom->AsDynamicTriShape())
+        {
+            RE::BSDynamicTriShape::DYNAMIC_TRISHAPE_RUNTIME_DATA const& dyn_rt = dyn->GetDynamicTrishapeRuntimeData();
+            if (dyn_rt.dynamicData && dyn_rt.dataSize >= 16u)
+            {
+                dynamic_positions = dyn_rt.dynamicData;
+                dynamic_vertex_capacity = dyn_rt.dataSize / 16u;
+            }
+        }
+
         for (uint32_t p = 0; p < partition_count; ++p)
         {
             RE::NiSkinPartition::Partition const& part = skin_partition->partitions[p];
@@ -1047,8 +1069,144 @@ namespace
             uint32_t const palette_count = std::min(skin->skinData->GetBoneCount(), skin->numMatrices);
             if (palette_count == 0 || palette_count > Max_Palette_Bones)
             {
-                logger::debug("Mask overlay: skip skinned draw [palette slot count out of range] node={} partition={} palette={} budget={}", 
+                logger::debug("Mask overlay: skip skinned draw [palette slot count out of range] node={} partition={} palette={} budget={}",
                     node_name, p, palette_count, Max_Palette_Bones);
+                continue;
+            }
+
+            // ---- Positionless partition (partition desc without VF_VERTEX, FaceGen-family dynamic
+            // meshes: head, eyes, hair...): the partition buffer holds only UV/normal/tangent/color
+            // and the contiguous SKINNING block (weights f16x4 at the desc's skin offset, indices
+            // u8x4 right after). The engine keeps no source vertex buffer for skinned geometry, so
+            // the partition buffers are the only skin-data source; positions are rebuilt at draw
+            // time from dynamicData through the partition's vertexMap (partition-local → original
+            // index; null = identity) into a scratch stream, which keeps partition-local indexing
+            // of the scratch stream, the partition vertex buffer and the partition index buffer
+            // consistent. ----
+            if (!buff->vertexDesc.HasFlag(RE::BSGraphics::Vertex::VF_VERTEX))
+            {
+                if (!dynamic_positions)
+                {
+                    logger::warn("Mask overlay: skip skinned draw [positionless partition but no dynamic position data] node={} partition={} rtti={}",
+                        node_name, p, rtti_name ? rtti_name : "?");
+                    continue;
+                }
+
+                uint32_t const vertex_stride = vertex_size_of(buff->vertexDesc);
+                uint32_t const skin_offset = buff->vertexDesc.GetAttributeOffset(RE::BSGraphics::Vertex::VA_SKINNING);
+                if (vertex_stride == 0 || skin_offset + 12u > vertex_stride)
+                {
+                    logger::warn("Mask overlay: skip skinned draw [skin block does not fit the positionless partition layout] node={} partition={} skin_offset={} stride={}",
+                        node_name, p, skin_offset, vertex_stride);
+                    continue;
+                }
+
+                uint8_t const* const raw = buff->rawVertexData;
+                if (!raw)
+                {
+                    logger::warn("Mask overlay: skip skinned draw [raw vertex data missing for positionless partition validation] node={} partition={}",
+                        node_name, p);
+                    continue;
+                }
+
+                // Weights/indices validation on the partition's own data (positions are not in this
+                // buffer); the layout inside the SKINNING block is fixed by construction.
+                SkinningLayoutSpec const spec{ 1, REX::W32::DXGI_FORMAT_R16G16B16A16_FLOAT, 8u, 0u, REX::W32::DXGI_FORMAT_R8G8B8A8_UINT, 8u };
+                SkinnedMeshStats stats{ .position_finite = true };
+                SkinnedMeshVerdict const verdict = validate_skinned_mesh(
+                    raw, vertex_stride, 0u, 0u, spec,
+                    skin_offset, skin_offset + 8u,
+                    part.vertices, palette_count, stats, false);
+                if (verdict == SkinnedMeshVerdict::e_weights_bad)
+                {
+                    logger::warn("Mask overlay: skip skinned draw [positionless partition skin validation failed] node={} partition={} vertices={} stride={} skin_offset={} wsum=[{:.3f},{:.3f}] wbad={} imax={}/{}",
+                        node_name, p, part.vertices, vertex_stride, skin_offset,
+                        stats.weight_sum_min, stats.weight_sum_max, stats.bad_weight_vertices, stats.index_max, palette_count);
+                    continue;
+                }
+                if (stats.out_of_range_weighted_count > 0)
+                {
+                    logger::warn("Mask overlay: skip skinned draw [bone index exceeds palette bounds with non-zero weight] node={} partition={} palette={} oob_weighted={} first_oob_index={} first_oob_weight={:.4f}",
+                        node_name, p, palette_count, stats.out_of_range_weighted_count,
+                        stats.first_out_of_range_index, stats.first_out_of_range_weight);
+                    continue;
+                }
+
+                // ---- Index space detection: engine partition buffers may keep original
+                // (whole-mesh) vertex indexing or be packed subsets. An index-buffer value at or
+                // above part.vertices proves original indexing - the position stream is then a
+                // straight identity copy of dynamicData (any smaller fill leaves the higher
+                // indices fetching stale scratch content, which renders as huge garbage
+                // triangles). Otherwise the partition is packed and its vertexMap (when present)
+                // remaps the first part.vertices vertices. ----
+                uint32_t max_index = 0;
+                for (uint32_t t = 0; t < static_cast<uint32_t>(part.triangles) * 3u; ++t)
+                    max_index = std::max(max_index, static_cast<uint32_t>(part.triList[t]));
+                bool const original_indexing = max_index >= part.vertices;
+
+                // Every original position index this draw can reach must be inside dynamicData,
+                // and the sampled subset also checks the position floats are finite (corpses are
+                // static, so this is the one validation pass - no per-frame re-checking).
+                uint32_t const reachable_count = original_indexing ? max_index + 1u :
+                    (part.vertexMap ? part.vertices : std::min<uint32_t>(part.vertices, dynamic_vertex_capacity));
+                float const* const positions = static_cast<float const*>(dynamic_positions);
+                uint16_t const* const vertex_map = original_indexing ? nullptr : part.vertexMap;
+                if (reachable_count > dynamic_vertex_capacity)
+                {
+                    logger::warn("Mask overlay: skip skinned draw [dynamic position index out of bounds] node={} partition={} reachable={} capacity={} max_index={}",
+                        node_name, p, reachable_count, dynamic_vertex_capacity, max_index);
+                    continue;
+                }
+                constexpr uint32_t Dynamic_Sample_Limit = 256;
+                uint32_t const sample_step = (reachable_count > Dynamic_Sample_Limit) ?
+                    (reachable_count + Dynamic_Sample_Limit - 1) / Dynamic_Sample_Limit : 1;
+                bool positions_usable = true;
+                for (uint32_t v = 0; v < reachable_count; v += sample_step)
+                {
+                    float const* const src_pos = positions + static_cast<size_t>(v) * 4u;
+                    if (!std::isfinite(src_pos[0]) || !std::isfinite(src_pos[1]) || !std::isfinite(src_pos[2]))
+                    {
+                        logger::warn("Mask overlay: skip skinned draw [dynamic positions non-finite] node={} partition={} vertex={}",
+                            node_name, p, v);
+                        positions_usable = false;
+                        break;
+                    }
+                }
+                if (positions_usable && vertex_map)
+                {
+                    // Remapped case: every mapped original index must be inside dynamicData.
+                    for (uint32_t v = 0; v < part.vertices; ++v)
+                    {
+                        if (static_cast<uint32_t>(vertex_map[v]) >= dynamic_vertex_capacity)
+                        {
+                            logger::warn("Mask overlay: skip skinned draw [dynamic position index out of bounds] node={} partition={} vertex={} original={} capacity={}",
+                                node_name, p, v, vertex_map[v], dynamic_vertex_capacity);
+                            positions_usable = false;
+                            break;
+                        }
+                    }
+                }
+                if (!positions_usable)
+                    continue;
+
+                RenderGeometry draw{};
+                draw.skin = geom_rt.skinInstance;
+                draw.partition = p;
+                draw.node.reset(geom);  // keeps the geometry (and its dynamicData) alive
+                draw.vertex_buffer = buff->vertexBuffer;
+                draw.index_buffer = buff->indexBuffer;
+                draw.vertex_desc = buff->vertexDesc;
+                draw.vertex_stride = vertex_stride;
+                draw.vertex_count = part.vertices;
+                draw.triangle_count = part.triangles;
+                draw.index_count = static_cast<uint32_t>(part.triangles) * 3u;
+                draw.position_format = REX::W32::DXGI_FORMAT_R32G32B32_FLOAT;
+                draw.position_offset = 0u;
+                draw.skin_layout = SkinLayout{ REX::W32::DXGI_FORMAT_R16G16B16A16_FLOAT, skin_offset, REX::W32::DXGI_FORMAT_R8G8B8A8_UINT, skin_offset + 8u };
+                draw.dynamic_positions = dynamic_positions;
+                draw.vertex_map = vertex_map;
+                draw.position_count = reachable_count;
+                render_geometries.push_back(std::move(draw));
                 continue;
             }
 
@@ -1073,7 +1231,7 @@ namespace
             SkinnedMeshVerdict verdict = validate_skinned_mesh(
                 raw, calibration.stride, calibration.position_offset, pos_bytes, *spec,
                 calibration.skin.weight_offset, calibration.skin.index_offset,
-                part.vertices, palette_count, stats);
+                part.vertices, palette_count, stats, true);
 
             if (verdict == SkinnedMeshVerdict::e_position_bad)
             {
@@ -1113,7 +1271,7 @@ namespace
                 verdict = validate_skinned_mesh(
                     raw, calibration.stride, calibration.position_offset, pos_bytes, *spec,
                     calibration.skin.weight_offset, calibration.skin.index_offset,
-                    part.vertices, palette_count, stats);
+                    part.vertices, palette_count, stats, true);
                 if (verdict != SkinnedMeshVerdict::e_ok)
                 {
                     logger::warn("Mask overlay: skip skinned draw [switched layout still fails mesh validation] node={} partition={} vertices={} palette={} stride={} layout={}",
@@ -1149,6 +1307,7 @@ namespace
             render_geometries.push_back(std::move(draw));
         }
     }
+
 
     void collect_geometry(RE::BSGeometry* geom, TargetContext const& target, std::vector<RenderGeometry>& render_geometries)
     {

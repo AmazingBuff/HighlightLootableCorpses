@@ -62,6 +62,21 @@ struct RenderGeometry
     uint32_t partition;
     // Skinning weight/index layout: only skinned geometries store a calibration result; static geometries keep the default values.
     SkinLayout skin_layout;
+
+    // Positionless skinned partitions (partition vertex desc without VF_VERTEX, e.g. FaceGen-family
+    // BSDynamicTriShape head parts - head, eyes, hair): the partition buffer carries only
+    // UV/normal/tangent/color and the SKINNING block; model-space positions live in
+    // BSDynamicTriShape::dynamicData (one float4 per ORIGINAL vertex). At draw time the position
+    // stream is rebuilt into a scratch vertex buffer: position_count entries are copied
+    // identity-mapped from dynamicData; when the partition turns out to be a packed subset
+    // (all index-buffer values below part.vertices AND a vertexMap present), the first
+    // vertex_count entries are additionally remapped through vertex_map. The engine does not
+    // keep a source vertex buffer for skinned geometry (measured: rendererData->vertexBuffer is
+    // null), so the partition buffers are the only skin-data source. dynamic_positions == null
+    // marks the standard single-stream paths.
+    const void* dynamic_positions;
+    const std::uint16_t* vertex_map;
+    uint32_t position_count;  // identity-copy length (original positions) for the scratch stream
 };
 
 // Collect one run's render geometries from the mask targets along two paths, static (the

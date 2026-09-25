@@ -69,6 +69,7 @@ private:
     struct LayoutKey
     {
         bool skinned;
+        bool separate_position;  // positionless dynamic draws: POSITION comes from its own stream, skin data from slot 1
         bool full_precision;
         uint32_t position_format;  // the position format is a calibration result and must enter the key so different formats do not share a layout
         uint32_t position_offset;
@@ -87,7 +88,7 @@ private:
         size_t operator()(LayoutKey const& key) const noexcept
         {
             size_t val = Amazing_Hash;
-            hash_combine_mul(val, key.skinned, key.full_precision,
+            hash_combine_mul(val, key.skinned, key.separate_position, key.full_precision,
                 key.position_format, key.position_offset, key.skinning_offset, key.stride,
                 key.weight_format, key.weight_offset, key.index_format, key.index_offset);
             return val;
@@ -98,7 +99,8 @@ private:
     {
         bool operator()(LayoutKey const& lhs, LayoutKey const& rhs) const noexcept
         {
-            return lhs.skinned == rhs.skinned && lhs.full_precision == rhs.full_precision &&
+            return lhs.skinned == rhs.skinned && lhs.separate_position == rhs.separate_position &&
+                    lhs.full_precision == rhs.full_precision &&
                     lhs.position_format == rhs.position_format && lhs.position_offset == rhs.position_offset &&
                     lhs.skinning_offset == rhs.skinning_offset && lhs.stride == rhs.stride &&
                     lhs.weight_format == rhs.weight_format && lhs.weight_offset == rhs.weight_offset &&
@@ -107,6 +109,9 @@ private:
     };
 private:
     bool create_pipeline(REX::W32::ID3D11Device* device);
+    // Dynamic (positionless) draws upload their dynamicData positions into a scratch vertex
+    // buffer each draw; grows on demand (returns false on device failure).
+    bool ensure_dynamic_position_vb(REX::W32::ID3D11Device* device, uint32_t vertex_count);
     REX::W32::ID3D11InputLayout* get_layout(
         REX::W32::ID3D11Device* device,
         REX::W32::ID3DBlob* blob,
@@ -115,7 +120,8 @@ private:
         uint32_t stride,
         REX::W32::DXGI_FORMAT position_format,
         uint32_t position_offset,
-        SkinLayout const* skin_layout);
+        SkinLayout const* skin_layout,
+        bool separate_position);
     void release_layouts();
 private:
     REX::W32::ID3D11VertexShader* m_ref_vs_static;
@@ -124,6 +130,12 @@ private:
     REX::W32::ID3D11Buffer* m_per_draw_cb;  // b0: row_major float4x4 + uint object_id (80 bytes)
     REX::W32::ID3D11Buffer* m_palette_cb;   // b1: row_major float4x4[Max_Palette_Bones]
     REX::W32::ID3D11DepthStencilState* m_depth_nearest;  // Reverse-Z nearest-depth test; no CommonStates equivalent.
+
+    // Scratch vertex buffer for positionless dynamic draws (float4 per vertex), mapped and
+    // refilled per draw from BSDynamicTriShape::dynamicData; owned here so nothing
+    // device-lifetime-sensitive enters the cached RenderGeometry entries.
+    REX::W32::ID3D11Buffer* m_dynamic_position_vb;
+    uint32_t m_dynamic_position_capacity;  // vertices
 
     // InputLayout cache: keyed by (skinned, precision, attribute offsets, stride) - the attribute
     // offsets come from each mesh's vertexDesc and creating a device object per mesh is not
