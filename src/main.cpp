@@ -35,8 +35,6 @@ namespace
         case SKSE::MessagingInterface::kDataLoaded:
             (void)PLUGIN_NAMESPACE::QuickLootCompat::install();
             (void)PLUGIN_NAMESPACE::ShaderManager::instance().compile();
-            break;
-        case SKSE::MessagingInterface::kPostLoadGame:
             PLUGIN_NAMESPACE::Renderer::install();
             PLUGIN_NAMESPACE::InputManager::install();
             PLUGIN_NAMESPACE::Menu::register_menu();
