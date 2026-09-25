@@ -8,7 +8,7 @@ static constexpr std::string_view Config_Instruction = R"(
 [General]
 ; mod enabled on startup
 Enabled={}
-; toggle key virtual-key code (0 = disabled, rebindable in the MCP menu)
+; toggle key (SKSE key-macro code: 0-255 keyboard, 256-263 mouse buttons, 264-265 mouse wheel, 266-281 gamepad; 0 = disabled, rebindable in the MCP menu)
 Hotkey={}
 ; hotkey behavior: constant (0, toggle on/off) | pulse (1, highlight unsearched corpses then fade out)
 HotkeyMode={}
@@ -69,7 +69,7 @@ namespace
 
     void sanitize(Config& settings) noexcept
     {
-        settings.hotkey = settings.hotkey > 0xFEu ? 0u : settings.hotkey;  // 0 = not bound
+        settings.hotkey = settings.hotkey < SKSE::InputMap::kMaxMacros ? settings.hotkey : 0u;  // 0 = not bound
         settings.hotkey_mode = settings.hotkey_mode > Config::HotkeyMode::e_pulse
                                      ? Config::HotkeyMode::e_constant
                                      : settings.hotkey_mode;

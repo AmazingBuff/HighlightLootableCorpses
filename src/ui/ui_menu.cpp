@@ -15,42 +15,19 @@ PLUGIN_NAMESPACE_BEGIN
 
 namespace
 {
-    std::string hotkey_name(uint32_t vk)
+    // Hotkey rebinding state: active while the General page shows "Press any key...". The
+    // capture ends on the first accepted key press (Menu::feed_rebind) or after the timeout.
+    constexpr std::chrono::milliseconds Rebind_Timeout{5000};
+    bool s_rebinding = false;
+    std::chrono::steady_clock::time_point s_rebind_start{};
+
+    // Display name of a stored hotkey: cfg.hotkey lives in the SKSE macro code space (keyboard
+    // DIK, then mouse buttons/wheel and gamepad), which GetKeyName dispatches by range.
+    std::string hotkey_name(uint32_t key)
     {
-        if (vk == 0)
+        if (key == 0)
             return "None";
-
-        static constexpr std::string_view s_key_names[] = {
-            "Backspace"sv, "Tab"sv, ""sv, ""sv, ""sv, "Enter"sv, ""sv, ""sv,   // 0x08-0x0F
-            "Shift"sv, "Ctrl"sv, "Alt"sv, "Pause"sv, "Caps"sv, ""sv, ""sv, ""sv, ""sv, ""sv, ""sv, "Esc"sv, ""sv, ""sv, ""sv, ""sv,   // 0x10-0x1F
-            "Space"sv, "PgUp"sv, "PgDn"sv, "End"sv, "Home"sv, "Left"sv, "Up"sv, "Right"sv, "Down"sv, ""sv, ""sv, ""sv, ""sv, "Ins"sv, "Del"sv,   // 0x20-0x2E
-        };
-        if (vk >= 0x08 && vk <= 0x2E)
-        {
-            std::string_view const name = s_key_names[vk - 0x08];
-            if (!name.empty())
-                return name.data();
-        }
-        if (vk >= 0x30 && vk <= 0x39)
-            return {1, static_cast<char>(vk)};                        // 0-9
-        if (vk >= 0x41 && vk <= 0x5A)
-            return {1, static_cast<char>(vk)};                        // A-Z
-        if (vk >= 0x60 && vk <= 0x69)
-            return fmt::format("Num {}", vk - 0x60);                             // numpad 0-9
-        if (vk >= 0x70 && vk <= 0x87)
-            return fmt::format("F{}", vk - 0x6F);                                // F1-F24
-
-        switch (vk)
-        {
-        case 0x01: return "LMB";
-        case 0x02: return "RMB";
-        case 0x04: return "MMB";
-        case 0x05: return "Mouse 4";
-        case 0x06: return "Mouse 5";
-        default:
-            logger::warn("Unsupported hotkey {}!", vk);
-        }
-        return fmt::format("0x{:02X}", vk);
+        return SKSE::InputMap::GetKeyName(key);
     }
 
     // MCP menu callbacks: run on the game's main thread (the framework calls them inside an imgui
@@ -79,10 +56,10 @@ namespace
 
         ImGuiMCP::Checkbox("Enabled", &cfg.enabled);
 
-        static bool s_rebinding = false;
-        std::string const label = s_rebinding ? std::string("Press any key...") : fmt::format("Hotkey: {}", hotkey_name(cfg.hotkey));
+        Menu::update_rebinding();
+        std::string const label = Menu::is_rebinding() ? std::string("Press any key...") : fmt::format("Hotkey: {}", hotkey_name(cfg.hotkey));
         if (ImGuiMCP::Button(label.c_str()))
-            s_rebinding = !s_rebinding;
+            Menu::toggle_rebinding();
 
         size_t hk_index = static_cast<size_t>(cfg.hotkey_mode);
         if (ImGuiMCP::Button(fmt::format("Hotkey Mode: {}", s_hotkey_mode_names[hk_index]).c_str()))
@@ -200,6 +177,43 @@ namespace
 bool Menu::is_menu_open()
 {
     return SKSEMenuFramework::IsInstalled() && SKSEMenuFramework::IsAnyBlockingWindowOpened();
+}
+
+bool Menu::is_rebinding()
+{
+    return s_rebinding;
+}
+
+void Menu::toggle_rebinding()
+{
+    s_rebinding = !s_rebinding;
+    s_rebind_start = std::chrono::steady_clock::now();
+}
+
+void Menu::update_rebinding()
+{
+    if (s_rebinding && std::chrono::steady_clock::now() - s_rebind_start > Rebind_Timeout)
+        s_rebinding = false;
+}
+
+void Menu::feed_rebind(RE::ButtonEvent const& event, uint32_t macro_key)
+{
+    if (!s_rebinding || !event.IsDown() || macro_key == 0)
+        return;
+
+    // Presses over the framework panel stay with imgui (clicking the hotkey button again
+    // cancels instead of binding); presses outside the panel - and every keyboard/gamepad
+    // press - bind. ESC may close the panel, but the sink sees the down event first and the
+    // bind still applies.
+    if (event.device.get() == RE::INPUT_DEVICE::kMouse)
+    {
+        ImGuiMCP::ImGuiIO* const io = ImGuiMCP::GetIO();
+        if (io && io->WantCaptureMouse)
+            return;
+    }
+
+    Setting::instance().get_config().hotkey = macro_key;
+    s_rebinding = false;
 }
 
 void Menu::register_menu()

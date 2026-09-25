@@ -8,12 +8,10 @@ PLUGIN_NAMESPACE_BEGIN
 
 namespace
 {
-    uint32_t dik_from_vk(uint32_t vk)
-    {
-        return vk > 0xFFu ? 0u : MapVirtualKeyA(vk, MAPVK_VK_TO_VSC);
-    }
-
-    bool macro_key_code(RE::ButtonEvent const& event, uint32_t& out)
+    // SKSE macro code of a button event: keyboard (DIK), then mouse buttons/wheel and gamepad
+    // (SKSE::InputMap offsets). cfg.hotkey is stored in this same space, so the trigger and the
+    // MCP rebinding capture compare raw macro codes with no per-device translation.
+    uint32_t macro_key_code(RE::ButtonEvent const& event, uint32_t& out)
     {
         switch (event.device.get())
         {
@@ -33,17 +31,21 @@ namespace
 
     void button_event(RE::ButtonEvent* event)
     {
-        if (Menu::is_menu_open())
-            return;
-
         uint32_t key = 0;
         if (!macro_key_code(*event, key))
             return;
 
-        // just hotkey
-        if (uint32_t const& vk = Setting::instance().get_config().hotkey)
+        // While the MCP menu is open the rebinding capture consumes key presses (ESC may close
+        // the panel, but the sink sees the down event first and the bind still applies).
+        if (Menu::is_menu_open())
         {
-            if (event->IsDown() && key == dik_from_vk(vk))
+            Menu::feed_rebind(*event, key);
+            return;
+        }
+
+        if (uint32_t const hotkey = Setting::instance().get_config().hotkey)
+        {
+            if (event->IsDown() && key == hotkey)
             {
                 Config& cfg = Setting::instance().get_config();
                 if (cfg.hotkey_mode == Config::HotkeyMode::e_pulse)
