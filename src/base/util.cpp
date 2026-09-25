@@ -147,6 +147,24 @@ namespace Util
             return is_corpse_actor(actor);
         return is_ash_pile(ref) || is_corpse_object(ref);
     }
+
+    uint32_t macro_key_code(RE::ButtonEvent const& event, uint32_t& out)
+    {
+        switch (event.device.get())
+        {
+        case RE::INPUT_DEVICE::kKeyboard:
+            out = event.idCode;
+            return true;
+        case RE::INPUT_DEVICE::kMouse:
+            out = SKSE::InputMap::kMacro_MouseButtonOffset + event.idCode;
+            return true;
+        case RE::INPUT_DEVICE::kGamepad:
+            out = SKSE::InputMap::kMacro_GamepadOffset + SKSE::InputMap::GamepadMaskToKeycode(event.idCode);
+            return true;
+        default:
+            return false;
+        }
+    }
 }
 
 PLUGIN_NAMESPACE_END

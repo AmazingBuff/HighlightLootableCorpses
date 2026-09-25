@@ -1,8 +1,8 @@
 #include "input.h"
 
+#include "base/util.h"
 #include "config/config.h"
 #include "ui/pulse_timer.h"
-#include "ui/ui_menu.h"
 
 PLUGIN_NAMESPACE_BEGIN
 
@@ -11,7 +11,7 @@ namespace
     void button_event(RE::ButtonEvent* event)
     {
         uint32_t key = 0;
-        if (!macro_key_code(*event, key))
+        if (!Util::macro_key_code(*event, key))
             return;
 
         // While an MCP window is open the framework freezes engine input, so this sink receives
