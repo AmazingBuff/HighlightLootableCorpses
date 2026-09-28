@@ -4,8 +4,8 @@
 
 #include "renderer.h"
 
-#include "present_hook.h"
 #include "render_util.h"
+#include "ui_render_hook.h"
 
 #include "config/config.h"
 #include "icon/icon_layout.h"
@@ -73,6 +73,53 @@ namespace
         return Icon::icon_clip_tip(clip, width, height, tip);
     }
 
+    bool render_target_dimensions(REX::W32::ID3D11RenderTargetView* target, uint32_t& width, uint32_t& height)
+    {
+        if (!target)
+            return false;
+
+        REX::W32::D3D11_RENDER_TARGET_VIEW_DESC view_desc{};
+        target->GetDesc(&view_desc);
+
+        uint32_t mip_slice = 0;
+        switch (view_desc.viewDimension)
+        {
+        case REX::W32::D3D11_RTV_DIMENSION_TEXTURE2D:
+            mip_slice = view_desc.texture2D.mipSlice;
+            break;
+        case REX::W32::D3D11_RTV_DIMENSION_TEXTURE2DARRAY:
+            mip_slice = view_desc.texture2DArray.mipSlice;
+            break;
+        case REX::W32::D3D11_RTV_DIMENSION_TEXTURE2DMS:
+        case REX::W32::D3D11_RTV_DIMENSION_TEXTURE2DMSARRAY:
+            break;
+        default:
+            return false;
+        }
+
+        REX::W32::ID3D11Resource* resource = nullptr;
+        target->GetResource(&resource);
+        if (!resource)
+            return false;
+
+        REX::W32::ID3D11Texture2D* texture = nullptr;
+        REX::W32::HRESULT const query_hr = resource->QueryInterface(REX::W32::IID_ID3D11Texture2D, reinterpret_cast<void**>(&texture));
+        resource->Release();
+        if (!REX::W32::SUCCESS(query_hr) || !texture)
+            return false;
+
+        REX::W32::D3D11_TEXTURE2D_DESC texture_desc{};
+        texture->GetDesc(&texture_desc);
+        texture->Release();
+
+        if (mip_slice >= texture_desc.mipLevels || mip_slice >= 32)
+            return false;
+
+        width = std::max(1u, texture_desc.width >> mip_slice);
+        height = std::max(1u, texture_desc.height >> mip_slice);
+        return true;
+    }
+
     class OverlayDirector
     {
     public:
@@ -82,7 +129,7 @@ namespace
             return s_instance;
         }
 
-        void on_present(REX::W32::IDXGISwapChain* swap_chain)
+        void on_pre_ui_draw()
         {
             std::lock_guard<std::mutex> const draw_lock(m_draw_mutex);
 
@@ -98,25 +145,26 @@ namespace
             if (!device || !context)
                 return;
 
+            REX::W32::ID3D11RenderTargetView* const output_target = rt.renderTargets[RE::RENDER_TARGETS::kFRAMEBUFFER].RTV;
+            uint32_t width = 0;
+            uint32_t height = 0;
+            if (!render_target_dimensions(output_target, width, height))
+                return;
+
             RE::BSGraphics::State* bs_state = RE::BSGraphics::State::GetSingleton();
             uint32_t const frame = bs_state ? bs_state->GetFrameCount() : 0;
 
-            bool const skip_draw = (frame != 0) && (frame == m_last_drawn_frame);
-            if (!skip_draw)
-            {
-                if (frame != 0)
-                    m_last_drawn_frame = frame;
+            if (frame == 0 || frame == m_last_drawn_frame)
+                return;
 
-                draw(swap_chain, device, context);
-            }
+            m_last_drawn_frame = frame;
+            draw(device, context, output_target, width, height);
         }
 
     private:
         OverlayDirector() :
             m_scan_in_flight(false),
             m_last_drawn_frame(std::numeric_limits<uint32_t>::max()),
-            m_back_buffer(nullptr),
-            m_render_target(nullptr),
             m_ready(false) {}
 
         void schedule_scan()
@@ -142,23 +190,10 @@ namespace
             }
         }
 
-        void draw(REX::W32::IDXGISwapChain* swap_chain, REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context)
+        void draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context,
+            REX::W32::ID3D11RenderTargetView* output_target, uint32_t width, uint32_t height)
         {
-            if (!init(swap_chain, device) || !update_back_buffer(swap_chain, device))
-                return;
-
-            REX::W32::D3D11_TEXTURE2D_DESC desc{};
-            m_back_buffer->GetDesc(&desc);
-
-            uint32_t w = desc.width;
-            uint32_t h = desc.height;
-            if (w <= 0 || h <= 0)
-            {
-                RE::BSGraphics::ScreenSize const screen = RE::BSGraphics::Renderer::GetScreenSize();
-                w = screen.width;
-                h = screen.height;
-            }
-            if (w <= 0 || h <= 0)
+            if (!init(device))
                 return;
 
             std::vector<CorpseScan::CorpseInfo> corpses = CorpseScan::instance().snapshot();
@@ -177,14 +212,17 @@ namespace
                 Color color;
                 color.decode(cfg.outline_color);
                 RE::NiCamera* camera = RE::Main::WorldRootCamera();
+                if (!camera)
+                    return;
 
-                if (pulse > 0.f) {
+                if (pulse > 0.f)
+                {
                     if (cfg.display_mode == Config::DisplayMode::e_icon)
                     {
 
                         RE::BSGraphics::ViewData const* view_data = update_view_data(camera);
 
-                        m_icon_overlay.begin_frame(w, h);
+                        m_icon_overlay.begin_frame(width, height);
 
                         std::vector<Icon::IconCandidate> candidates;
                         candidates.reserve(corpses.size());
@@ -192,7 +230,7 @@ namespace
                         {
                             DirectX::XMFLOAT3 const top = Icon::icon_anchor(render_cast(corpse.bound_min), render_cast(corpse.bound_max));
                             DirectX::XMFLOAT2 tip{};
-                            if (!project_icon_tip(camera, view_data, top, static_cast<float>(w), static_cast<float>(h), tip))
+                            if (!project_icon_tip(camera, view_data, top, static_cast<float>(width), static_cast<float>(height), tip))
                                 continue;
 
                             float const alpha = pulse * corpse_alpha(cfg, corpse.distance, color.a());
@@ -203,17 +241,17 @@ namespace
                         std::vector<Icon::IconVertex> vertices;
                         for (Icon::IconMarker const& marker : std::views::reverse(markers))
                         {
-                            Icon::IconGeometry const geometry = Icon::icon_geometry(marker, { color.r(), color.g(), color.b() }, static_cast<float>(w), static_cast<float>(h));
+                            Icon::IconGeometry const geometry = Icon::icon_geometry(marker, { color.r(), color.g(), color.b() }, static_cast<float>(width), static_cast<float>(height));
                             if (vertices.size() + geometry.count <= Icon::Icon_Max_Vertex_Count)
                                 vertices.insert(vertices.end(), geometry.vertices.begin(), geometry.vertices.begin() + static_cast<int64_t>(geometry.count));
                         }
-                        m_icon_overlay.draw(context, m_render_target, vertices, *m_states);
+                        m_icon_overlay.draw(context, output_target, vertices, *m_states);
                         m_icon_overlay.end_frame();
 
                     }
                     else
                     {
-                        if (!m_mask_overlay.begin_frame(device, w, h))
+                        if (!m_mask_overlay.begin_frame(device, width, height))
                         {
                             m_mask_overlay.end_frame();
                             return;
@@ -308,14 +346,14 @@ namespace
                         }
 
                         if (!render_geometries.empty())
-                            m_mask_overlay.draw(device, context, camera, m_render_target, desc.width, desc.height, colors, render_geometries, *m_states);
+                            m_mask_overlay.draw(device, context, camera, output_target, width, height, colors, render_geometries, *m_states);
                         m_mask_overlay.end_frame();
                     }
                 }
             }
         }
 
-        bool init(REX::W32::IDXGISwapChain* swap_chain, REX::W32::ID3D11Device* device)
+        bool init(REX::W32::ID3D11Device* device)
         {
             if (m_ready)
                 return true;
@@ -329,75 +367,8 @@ namespace
             if (!m_states || !m_states->valid() || !m_icon_overlay.init(device) || !m_mask_overlay.init(device))
                 return false;
 
-            // The REX mirror's GetBuffer takes the REX IID constant directly (same GUID value as __uuidof).
-            REX::W32::ID3D11Texture2D* buffer = nullptr;
-            REX::W32::HRESULT const hr = swap_chain->GetBuffer(0, REX::W32::IID_ID3D11Texture2D, reinterpret_cast<void**>(&buffer));
-            if (!REX::W32::SUCCESS(hr) || !buffer)
-                return false;
-
-            if (buffer == m_back_buffer)
-            {
-                buffer->Release();
-                m_ready = true;
-                return false;
-            }
-
-            if (m_render_target)
-            {
-                m_render_target->Release();
-                m_render_target = nullptr;
-            }
-            if (m_back_buffer)
-            {
-                m_back_buffer->Release();
-                m_back_buffer = nullptr;
-            }
-
-            m_back_buffer = buffer;
-            REX::W32::HRESULT const rtv_hr = device->CreateRenderTargetView(m_back_buffer, nullptr, &m_render_target);
-            if (!REX::W32::SUCCESS(rtv_hr) || !m_render_target)
-            {
-                logger::error("Failed to create backbuffer RTV: {:X}", static_cast<unsigned int>(rtv_hr));
-                return false;
-            }
-
             m_ready = true;
             return m_ready;
-        }
-
-        bool update_back_buffer(REX::W32::IDXGISwapChain* swap_chain, REX::W32::ID3D11Device* device)
-        {
-            REX::W32::ID3D11Texture2D* buffer = nullptr;
-            REX::W32::HRESULT const hr = swap_chain->GetBuffer(0, REX::W32::IID_ID3D11Texture2D, reinterpret_cast<void**>(&buffer));
-            if (!REX::W32::SUCCESS(hr) || !buffer)
-                return false;
-
-            if (buffer == m_back_buffer)
-            {
-                buffer->Release();
-                return true;
-            }
-
-            if (m_render_target)
-            {
-                m_render_target->Release();
-                m_render_target = nullptr;
-            }
-            if (m_back_buffer)
-            {
-                m_back_buffer->Release();
-                m_back_buffer = nullptr;
-            }
-
-            m_back_buffer = buffer;
-
-            REX::W32::HRESULT const rtv_hr = device->CreateRenderTargetView(m_back_buffer, nullptr, &m_render_target);
-            if (!REX::W32::SUCCESS(rtv_hr) || !m_render_target)
-            {
-                logger::error("Failed to create backbuffer RTV: {:X}", static_cast<unsigned int>(rtv_hr));
-                return false;
-            }
-            return true;
         }
 
     private:
@@ -406,9 +377,6 @@ namespace
 
         uint32_t m_last_drawn_frame;
         std::mutex m_draw_mutex;
-
-        REX::W32::ID3D11Texture2D* m_back_buffer;
-        REX::W32::ID3D11RenderTargetView* m_render_target;
 
         // Icon-mode grouping state: the corpse→representative assignment of the previous drawn
         // frame (icon_marker reads it for the hysteresis and writes the new assignment back).
@@ -426,22 +394,16 @@ namespace
         bool m_ready;
     };
 
-    void present_callback(REX::W32::IDXGISwapChain* swap_chain)
+    void pre_ui_callback(int64_t)
     {
-        OverlayDirector::instance().on_present(swap_chain);
+        OverlayDirector::instance().on_pre_ui_draw();
     }
 }
 
 void Renderer::install()
 {
-    // The geometry cache self-manages equip invalidation: install() registers its equip sink
-    // with the script event source. It lives here because equip invalidation must exist before
-    // gameplay and kPostLoadGame keeps the whole render lifecycle in one place; the call is
-    // idempotent (AddEventSink deduplicates identical sinks), so the repeated message on every
-    // load is harmless.
     RenderGeometryCache::instance().install();
-
-    (void)PresentHook::instance().install(&present_callback);
+    (void)UiRenderHook::instance().install(&pre_ui_callback);
 }
 
 PLUGIN_NAMESPACE_END

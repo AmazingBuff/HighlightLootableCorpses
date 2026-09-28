@@ -136,7 +136,6 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
     }
 
     D3D11StateCapture capture(context);
-    capture.capture();
 
     REX::W32::D3D11_VIEWPORT const viewport{
         .topLeftX = 0.0f,
@@ -151,8 +150,6 @@ void MaskOverlay::draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceCon
         draw_silhouette(device, context, overlay_target, render_geometries, view_proj, viewport, states);
     else
         draw_outline(device, context, overlay_target, render_geometries, view_proj, viewport, states);
-    
-    capture.restore();
 }
 
 void MaskOverlay::end_frame()

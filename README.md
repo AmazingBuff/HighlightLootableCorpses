@@ -7,7 +7,7 @@ A corpse-detection overlay for **Skyrim Special Edition / Anniversary Edition** 
 ## Features
 
 - **Lootable-only highlighting** — corpses whose inventory still holds takeable items are highlighted; fully looted corpses drop out of the overlay
-- **See through everything** — highlights are drawn after the scene renders and ignore scene depth, so grass, bushes, walls, and hills never hide a corpse
+- **See through everything** — highlights are drawn after the scene and before native game UI, and ignore scene depth, so grass, bushes, walls, and hills never hide a corpse
 - **Three display modes** — `silhouette` (filled mask of the nearest highlighted surface per pixel), `outline` (bright core plus outward colored halo), and `icon` (downward arrows above corpse bounds; nearby crowded targets share a larger double arrow)
 - **Dead-on placement** — positions come from ragdoll bodies and Havok collision bounds, with largest-cluster handling after dismemberment and a geometry fallback
 - **Ash pile support** — ash piles from reanimated / disintegrated enemies (including Dawnguard / Dragonborn variants such as Soul Embers and Ash Spawn) are checked through the original actor they point to
@@ -19,9 +19,11 @@ A corpse-detection overlay for **Skyrim Special Edition / Anniversary Edition** 
 - **QuickLoot IE support** — with the [QuickLoot IE](https://www.nexusmods.com/skyrimspecialedition/mods/120075) fork installed, opening its loot menu counts as searching that corpse (optional)
 - **Lightweight** — a throttled background scan plus minimal per-frame work; negligible frame-time impact
 
+Implementation details and verification commands are documented in [Rendering](docs/features/rendering.md).
+
 ## Requirements
 
-- [Skyrim Special Edition / AE](https://store.steampowered.com/app/489830/) **1.6.629 or newer** (1.6.1170 and 1.7.99 verified). SE 1.5.97 and Skyrim VR are supported theoretically.
+- [Skyrim Special Edition / AE](https://store.steampowered.com/app/489830/) **1.6.629 or newer** (the prior release was verified on 1.6.1170 and 1.7.99). This pre-UI integration supports flat SE/AE only; current in-game, ENB, and Community Shaders compatibility remains pending, and Skyrim VR is unsupported by this path.
 - [SKSE64](https://skse.silverlock.org/) matching your game version
 - [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) (All in one)
 - Optional: [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352) — enables the in-game settings panel. Without it the mod works normally and is configured through the INI file.
@@ -133,7 +135,7 @@ The plugin DLL is written to:
 build/Release/HighlightLootableCorpses.dll
 ```
 
-Builds target Skyrim SE and AE (VR support is compiled out). Dependencies (via vcpkg): fmt, spdlog, SimpleIni, DirectXMath, DirectXTK.
+Builds target Skyrim SE and AE (VR support is compiled out). Dependencies (via vcpkg): fmt, spdlog, SimpleIni, DirectXMath, DirectXTK, and static Microsoft Detours.
 
 ## License
 

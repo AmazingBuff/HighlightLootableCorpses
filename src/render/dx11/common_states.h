@@ -8,11 +8,11 @@
 
 PLUGIN_NAMESPACE_BEGIN
 
-// Local, REX::W32-typed replacement for DirectXTK's CommonStates. Every state
-// description mirrors the pinned DirectXTK source tree (vcpkg directxtk may2026,
-// Src/CommonStates.cpp, MIT license) byte-faithfully. Deliberate deviation from
-// DirectXTK: the constructor never throws; a failed device call logs, leaves the
-// affected state null and clears valid().
+// Local, REX::W32-typed replacement for DirectXTK's CommonStates. The state
+// descriptions follow the pinned DirectXTK source tree (vcpkg directxtk may2026,
+// Src/CommonStates.cpp, MIT license), with separate alpha factors for the
+// straight-color UI blend state. The constructor never throws; a failed device
+// call logs, leaves the affected state null and clears valid().
 class CommonStates
 {
 public:

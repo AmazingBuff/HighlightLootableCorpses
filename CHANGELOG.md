@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Fix corpse highlights drawing over the game HUD and menus; preserve D3D11 render state and compose transparent targets with correct straight-color and premultiplied outline alpha.
+
 ## [2.1.0] - 2026-09-25
 
 ### Changed

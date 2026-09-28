@@ -15,13 +15,15 @@ namespace
     // may2026-a68e548ea6.clean/Src/CommonStates.cpp), re-typed to REX::W32.
 
     bool create_blend_state(REX::W32::ID3D11Device* device, REX::W32::D3D11_BLEND src_blend, REX::W32::D3D11_BLEND dest_blend,
-        REX::W32::ID3D11BlendState** result)
+        REX::W32::ID3D11BlendState** result, REX::W32::D3D11_BLEND src_blend_alpha, REX::W32::D3D11_BLEND dest_blend_alpha)
     {
         REX::W32::D3D11_BLEND_DESC desc{};
 
         desc.renderTarget[0].blendEnable = (src_blend != REX::W32::D3D11_BLEND_ONE) || (dest_blend != REX::W32::D3D11_BLEND_ZERO);
-        desc.renderTarget[0].srcBlend = desc.renderTarget[0].srcBlendAlpha = src_blend;
-        desc.renderTarget[0].destBlend = desc.renderTarget[0].destBlendAlpha = dest_blend;
+        desc.renderTarget[0].srcBlend = src_blend;
+        desc.renderTarget[0].destBlend = dest_blend;
+        desc.renderTarget[0].srcBlendAlpha = src_blend_alpha;
+        desc.renderTarget[0].destBlendAlpha = dest_blend_alpha;
         desc.renderTarget[0].blendOp = desc.renderTarget[0].blendOpAlpha = REX::W32::D3D11_BLEND_OP_ADD;
 
         desc.renderTarget[0].renderTargetWriteMask = REX::W32::D3D11_COLOR_WRITE_ENABLE_ALL;
@@ -33,6 +35,12 @@ namespace
             return false;
         }
         return true;
+    }
+
+    bool create_blend_state(REX::W32::ID3D11Device* device, REX::W32::D3D11_BLEND src_blend, REX::W32::D3D11_BLEND dest_blend,
+        REX::W32::ID3D11BlendState** result)
+    {
+        return create_blend_state(device, src_blend, dest_blend, result, src_blend, dest_blend);
     }
 
     bool create_depth_stencil_state(REX::W32::ID3D11Device* device, bool enable, bool write_enable,
@@ -141,7 +149,8 @@ CommonStates::CommonStates(REX::W32::ID3D11Device* device) :
     m_valid = create_blend_state(device, REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_ZERO, &m_opaque) &&
               create_blend_state(device, REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, &m_alpha_blend) &&
               create_blend_state(device, REX::W32::D3D11_BLEND_SRC_ALPHA, REX::W32::D3D11_BLEND_ONE, &m_additive) &&
-              create_blend_state(device, REX::W32::D3D11_BLEND_SRC_ALPHA, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, &m_non_premultiplied) &&
+              create_blend_state(device, REX::W32::D3D11_BLEND_SRC_ALPHA, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, &m_non_premultiplied,
+                  REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_INV_SRC_ALPHA) &&
               create_depth_stencil_state(device, true, true, &m_depth_default) &&
               create_depth_stencil_state(device, true, false, &m_depth_read) &&
               create_depth_stencil_state(device, false, false, &m_depth_none) &&

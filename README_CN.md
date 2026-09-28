@@ -7,7 +7,7 @@
 ## 功能特性
 
 - **只标记可搜刮的尸体**——物品栏中仍有可拾取物品的尸体才会被高亮；搜空的尸体会从覆盖层中消失
-- **透视一切遮挡**——高亮绘制在场景渲染之后，无视场景深度，草丛、灌木、墙壁和山坡都无法遮住尸体
+- **透视一切遮挡**——高亮绘制在场景之后、原生游戏界面之前，并无视场景深度，草丛、灌木、墙壁和山坡都无法遮住尸体
 - **三种显示模式**——`silhouette`（剪影：逐像素填充最近的高亮表面）、`outline`（描边：明亮内核加向外的彩色光晕）、`icon`（图标：尸体包围盒上方的向下箭头；距离较近的密集目标共用一个更大的双箭头）
 - **精准贴合**——位置来自布娃娃物理体与 Havok 碰撞包围盒，肢解后按最大集群处理，并有几何体兜底
 - **灰堆支持**——复活/分解敌人留下的灰堆（含 Dawnguard / Dragonborn 的灵魂余烬、灰烬魔人等变体）会追溯到原角色进行检测
@@ -19,9 +19,11 @@
 - **QuickLoot IE 支持**——安装了 [QuickLoot IE](https://www.nexusmods.com/skyrimspecialedition/mods/120075) 分支版时，打开它的拾取菜单等同于搜刮该尸体（可选）
 - **轻量**——节流的后台扫描加上极低的逐帧开销；几乎不影响帧时间
 
+实现细节与验证命令见[渲染文档](docs/features/rendering.md)。
+
 ## 环境要求
 
-- [Skyrim Special Edition / AE](https://store.steampowered.com/app/489830/) **1.6.629 或更新**（已在 1.6.1170 和 1.7.99 上验证）。SE 1.5.97 与 Skyrim VR 理论上支持。
+- [Skyrim Special Edition / AE](https://store.steampowered.com/app/489830/) **1.6.629 或更新**（上一版本已在 1.6.1170 和 1.7.99 上验证）。本次界面前绘制集成仅支持平面版 SE/AE；当前游戏内、ENB 与 Community Shaders 兼容性仍待远程游戏机验证，Skyrim VR 不在此路径支持范围内。
 - 与游戏版本匹配的 [SKSE64](https://skse.silverlock.org/)
 - [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)（All in one 版）
 - 可选：[SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352)——启用游戏内设置面板。没有它模组也能正常工作，通过 INI 文件配置即可。
@@ -133,7 +135,7 @@ cmake --build build --config Release
 build/Release/HighlightLootableCorpses.dll
 ```
 
-构建目标为 Skyrim SE 与 AE（VR 支持未编译）。依赖项（经 vcpkg）：fmt、spdlog、SimpleIni、DirectXMath、DirectXTK。
+构建目标为 Skyrim SE 与 AE（VR 支持未编译）。依赖项（经 vcpkg）：fmt、spdlog、SimpleIni、DirectXMath、DirectXTK，以及静态 Microsoft Detours。
 
 ## 许可证
 

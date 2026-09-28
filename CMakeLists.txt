@@ -135,6 +135,14 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/SKSE-MCP)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(simpleini CONFIG REQUIRED)
+find_path(DETOURS_INCLUDE_DIRS "detours/detours.h" REQUIRED)
+find_library(DETOURS_LIBRARY detours REQUIRED)
+
+target_include_directories(
+	${PROJECT_NAME}
+	PRIVATE
+	${DETOURS_INCLUDE_DIRS}
+)
 
 target_link_libraries(
 	${PROJECT_NAME}
@@ -147,6 +155,7 @@ target_link_libraries(
 	d3d11
 	dxgi
 	d3dcompiler
+	${DETOURS_LIBRARY}
 )
 
 target_precompile_headers(

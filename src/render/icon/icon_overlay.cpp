@@ -106,7 +106,6 @@ void IconOverlay::draw(REX::W32::ID3D11DeviceContext* context, REX::W32::ID3D11R
         return;
 
     D3D11StateCapture capture(context);
-    capture.capture();
 
     REX::W32::D3D11_MAPPED_SUBRESOURCE mapped = {};
     if (!REX::W32::SUCCESS(context->Map(m_vertex_buffer, 0, REX::W32::D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
@@ -137,8 +136,6 @@ void IconOverlay::draw(REX::W32::ID3D11DeviceContext* context, REX::W32::ID3D11R
     context->VSSetShader(m_ref_vertex_shader, nullptr, 0);
     context->PSSetShader(m_ref_pixel_shader, nullptr, 0);
     context->Draw(static_cast<uint32_t>(vertices.size()), 0);
-
-    capture.restore();
 }
 
 void IconOverlay::end_frame()
