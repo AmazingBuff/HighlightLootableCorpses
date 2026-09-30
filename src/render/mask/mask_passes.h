@@ -60,8 +60,6 @@ public:
     bool init(REX::W32::ID3D11Device* device);
     void release();
 
-    [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_nearest() const noexcept { return m_depth_nearest; }
-
     // Draw every render geometry (the palette skinning is built here).
     void draw(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context, DirectX::XMFLOAT4X4 const& view_proj, std::span<RenderGeometry const> render_geometries);
 private:
@@ -126,7 +124,6 @@ private:
     REX::W32::ID3D11PixelShader* m_ref_ps_mask;
     REX::W32::ID3D11Buffer* m_per_draw_cb;  // b0: row_major float4x4 + uint object_id (80 bytes)
     REX::W32::ID3D11Buffer* m_palette_cb;   // b1: row_major float4x4[Max_Palette_Bones]
-    REX::W32::ID3D11DepthStencilState* m_depth_nearest;  // Reverse-Z nearest-depth test; no CommonStates equivalent.
 
     // InputLayout cache: keyed by (skinned, precision, attribute offsets, stride) - the attribute
     // offsets come from each mesh's vertexDesc and creating a device object per mesh is not

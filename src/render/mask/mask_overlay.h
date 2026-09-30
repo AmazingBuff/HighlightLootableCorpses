@@ -52,8 +52,8 @@ private:
         REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<std::vector<RenderGeometry>> const& render_geometries,
         DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& viewport, CommonStates const& states);
     void draw_outline(REX::W32::ID3D11Device* device, REX::W32::ID3D11DeviceContext* context,
-    REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<std::vector<RenderGeometry>> const& render_geometries,
-    DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& vp, CommonStates const& states);
+        REX::W32::ID3D11RenderTargetView* overlay_target, std::vector<std::vector<RenderGeometry>> const& render_geometries,
+        DirectX::XMFLOAT4X4 const& view_proj, REX::W32::D3D11_VIEWPORT const& vp, CommonStates const& states);
 private:
     // Facade state (owned exclusively by the render thread)
     REX::W32::ID3D11Device* m_ref_device;

@@ -15,7 +15,7 @@ namespace
     // may2026-a68e548ea6.clean/Src/CommonStates.cpp), re-typed to REX::W32.
 
     bool create_blend_state(REX::W32::ID3D11Device* device, REX::W32::D3D11_BLEND src_blend, REX::W32::D3D11_BLEND dest_blend,
-        REX::W32::ID3D11BlendState** result, REX::W32::D3D11_BLEND src_blend_alpha, REX::W32::D3D11_BLEND dest_blend_alpha)
+        REX::W32::D3D11_BLEND src_blend_alpha, REX::W32::D3D11_BLEND dest_blend_alpha, REX::W32::ID3D11BlendState** result)
     {
         REX::W32::D3D11_BLEND_DESC desc{};
 
@@ -40,17 +40,17 @@ namespace
     bool create_blend_state(REX::W32::ID3D11Device* device, REX::W32::D3D11_BLEND src_blend, REX::W32::D3D11_BLEND dest_blend,
         REX::W32::ID3D11BlendState** result)
     {
-        return create_blend_state(device, src_blend, dest_blend, result, src_blend, dest_blend);
+        return create_blend_state(device, src_blend, dest_blend, src_blend, dest_blend, result);
     }
 
-    bool create_depth_stencil_state(REX::W32::ID3D11Device* device, bool enable, bool write_enable,
+    bool create_depth_stencil_state(REX::W32::ID3D11Device* device, bool enable, REX::W32::D3D11_DEPTH_WRITE_MASK write_mask, REX::W32::D3D11_COMPARISON_FUNC depth_func,
         REX::W32::ID3D11DepthStencilState** result)
     {
         REX::W32::D3D11_DEPTH_STENCIL_DESC desc{};
 
         desc.depthEnable = enable;
-        desc.depthWriteMask = write_enable ? REX::W32::D3D11_DEPTH_WRITE_MASK_ALL : REX::W32::D3D11_DEPTH_WRITE_MASK_ZERO;
-        desc.depthFunc = REX::W32::D3D11_COMPARISON_LESS_EQUAL;
+        desc.depthWriteMask = write_mask;
+        desc.depthFunc = depth_func;
 
         desc.stencilEnable = false;
         desc.stencilReadMask = REX::W32::D3D11_DEFAULT_STENCIL_READ_MASK;
@@ -126,6 +126,7 @@ CommonStates::CommonStates(REX::W32::ID3D11Device* device) :
     m_depth_default(nullptr),
     m_depth_read(nullptr),
     m_depth_none(nullptr),
+    m_depth_nearest(nullptr),
     m_cull_none(nullptr),
     m_cull_none_scissor(nullptr),
     m_cull_clockwise(nullptr),
@@ -149,11 +150,11 @@ CommonStates::CommonStates(REX::W32::ID3D11Device* device) :
     m_valid = create_blend_state(device, REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_ZERO, &m_opaque) &&
               create_blend_state(device, REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, &m_alpha_blend) &&
               create_blend_state(device, REX::W32::D3D11_BLEND_SRC_ALPHA, REX::W32::D3D11_BLEND_ONE, &m_additive) &&
-              create_blend_state(device, REX::W32::D3D11_BLEND_SRC_ALPHA, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, &m_non_premultiplied,
-                  REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_INV_SRC_ALPHA) &&
-              create_depth_stencil_state(device, true, true, &m_depth_default) &&
-              create_depth_stencil_state(device, true, false, &m_depth_read) &&
-              create_depth_stencil_state(device, false, false, &m_depth_none) &&
+              create_blend_state(device, REX::W32::D3D11_BLEND_SRC_ALPHA, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, REX::W32::D3D11_BLEND_ONE, REX::W32::D3D11_BLEND_INV_SRC_ALPHA, &m_non_premultiplied) &&
+              create_depth_stencil_state(device, true, REX::W32::D3D11_DEPTH_WRITE_MASK_ALL, REX::W32::D3D11_COMPARISON_LESS_EQUAL, &m_depth_default) &&
+              create_depth_stencil_state(device, true, REX::W32::D3D11_DEPTH_WRITE_MASK_ZERO, REX::W32::D3D11_COMPARISON_LESS_EQUAL, &m_depth_read) &&
+              create_depth_stencil_state(device, false, REX::W32::D3D11_DEPTH_WRITE_MASK_ZERO, REX::W32::D3D11_COMPARISON_LESS_EQUAL, &m_depth_none) &&
+              create_depth_stencil_state(device, true, REX::W32::D3D11_DEPTH_WRITE_MASK_ALL, REX::W32::D3D11_COMPARISON_GREATER, &m_depth_nearest) &&
               create_rasterizer_state(device, REX::W32::D3D11_CULL_NONE, REX::W32::D3D11_FILL_SOLID, false, &m_cull_none) &&
               create_rasterizer_state(device, REX::W32::D3D11_CULL_NONE, REX::W32::D3D11_FILL_SOLID, true, &m_cull_none_scissor) &&
               create_rasterizer_state(device, REX::W32::D3D11_CULL_FRONT, REX::W32::D3D11_FILL_SOLID, false, &m_cull_clockwise) &&
@@ -218,6 +219,11 @@ CommonStates::~CommonStates()
     {
         m_cull_none->Release();
         m_cull_none = nullptr;
+    }
+    if (m_depth_nearest)
+    {
+        m_depth_nearest->Release();
+        m_depth_nearest = nullptr;
     }
     if (m_depth_none)
     {
@@ -294,6 +300,11 @@ REX::W32::ID3D11DepthStencilState* CommonStates::depth_read() const
 REX::W32::ID3D11DepthStencilState* CommonStates::depth_none() const
 {
     return m_depth_none;
+}
+
+REX::W32::ID3D11DepthStencilState* CommonStates::depth_nearest() const
+{
+    return m_depth_nearest;
 }
 
 REX::W32::ID3D11RasterizerState* CommonStates::cull_none() const

@@ -131,8 +131,6 @@ namespace
 
         void on_pre_ui_draw()
         {
-            std::lock_guard<std::mutex> const draw_lock(m_draw_mutex);
-
             schedule_scan();
 
             RE::BSGraphics::Renderer* renderer = RE::BSGraphics::Renderer::GetSingleton();
@@ -376,7 +374,6 @@ namespace
         std::atomic<bool> m_scan_in_flight;
 
         uint32_t m_last_drawn_frame;
-        std::mutex m_draw_mutex;
 
         // Icon-mode grouping state: the corpse→representative assignment of the previous drawn
         // frame (icon_marker reads it for the hysteresis and writes the new assignment back).
@@ -386,10 +383,6 @@ namespace
         std::unique_ptr<CommonStates> m_states;
         Icon::IconOverlay m_icon_overlay;
         Mask::MaskOverlay m_mask_overlay;
-
-        // The form-id LRU cache (RenderGeometryCache) is the plugin-wide singleton: it owns its
-        // equip-invalidation sink/inbox/drain, so the render branch draws from the exact
-        // instance the sink posts into.
 
         bool m_ready;
     };

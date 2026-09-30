@@ -17,14 +17,14 @@ MASK_NAMESPACE_BEGIN
 namespace
 {
     [[nodiscard]] ROI::Region group_region(
-        std::span<RenderGeometry const> group,
+        std::span<GeometryTarget const> group,
         DirectX::XMFLOAT4X4 const& view_proj,
         uint32_t width,
         uint32_t height)
     {
         std::vector<ROI::Sphere> spheres;
         spheres.reserve(group.size());
-        for (RenderGeometry const& draw : group)
+        for (auto const& [index, draw] : group)
         {
             if (!draw.node)
                 return ROI::full_region();
@@ -177,7 +177,7 @@ void MaskOverlay::draw_silhouette(REX::W32::ID3D11Device* device, REX::W32::ID3D
     context->ClearDepthStencilView(m_mask_rt.dsv(), REX::W32::D3D11_CLEAR_DEPTH, 0.0f, 0);
 
     context->OMSetBlendState(states.opaque(), nullptr, 0xFFFFFFFF);
-    context->OMSetDepthStencilState(m_geometry_pass.depth_nearest(), 0);
+    context->OMSetDepthStencilState(states.depth_nearest(), 0);
     context->RSSetState(states.cull_none());
     context->RSSetViewports(1, &viewport);
     m_geometry_pass.draw(device, context, view_proj, merged);

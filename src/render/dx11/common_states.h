@@ -34,6 +34,7 @@ public:
     [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_default() const;
     [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_read() const;
     [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_none() const;
+    [[nodiscard]] REX::W32::ID3D11DepthStencilState* depth_nearest() const;
 
     [[nodiscard]] REX::W32::ID3D11RasterizerState* cull_none() const;
     [[nodiscard]] REX::W32::ID3D11RasterizerState* cull_none_scissor() const;
@@ -57,6 +58,7 @@ private:
     REX::W32::ID3D11DepthStencilState* m_depth_default;
     REX::W32::ID3D11DepthStencilState* m_depth_read;
     REX::W32::ID3D11DepthStencilState* m_depth_none;
+    REX::W32::ID3D11DepthStencilState* m_depth_nearest;
 
     REX::W32::ID3D11RasterizerState* m_cull_none;
     REX::W32::ID3D11RasterizerState* m_cull_none_scissor;

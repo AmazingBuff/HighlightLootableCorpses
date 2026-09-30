@@ -48,12 +48,6 @@ struct RenderGeometry
     RE::NiPointer<RE::NiSkinInstance> skin;  // keeps the skin instance alive (bone world matrices)
     RE::NiPointer<RE::BSGeometry> node;  // keeps the static-path geometry (and its GPU buffers) alive
 
-    // Index of the target in the caller's target list (collection time). The render thread compacts
-    // frustum-surviving corpses into the per-frame visible-target order, rewriting target_index to
-    // the outer index on a local copy (the cache's stored list is never mutated), so style indexing
-    // and outline grouping stay per-frame correct without any form-id remap.
-    uint32_t target_index;
-
     // Position attribute layout: the static path stores the calibrate_position_format result
     // (UNKNOWN means derive from desc); the skinned path stores the offset-spacing result.
     RE::BSGraphics::VertexDesc vertex_desc;
@@ -77,6 +71,12 @@ struct RenderGeometry
     // standard single-stream paths (slot 0 then carries positions inside vertex_buffer).
     REX::W32::ID3D11Buffer* position_buffer;
     uint32_t position_stride;  // byte stride of one position-stream vertex (float4 = 16 bytes); like position_buffer, meaningful only when it is set
+
+    // Index of the target in the caller's target list (collection time). The render thread compacts
+    // frustum-surviving corpses into the per-frame visible-target order, rewriting target_index to
+    // the outer index on a local copy (the cache's stored list is never mutated), so style indexing
+    // and outline grouping stay per-frame correct without any form-id remap.
+    uint32_t target_index;
 };
 
 // Collect one run's render geometries from the mask targets along two paths, static (the

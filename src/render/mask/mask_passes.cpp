@@ -149,8 +149,7 @@ MaskGeometryPass::MaskGeometryPass() :
     m_ref_vs_skinned(nullptr),
     m_ref_ps_mask(nullptr),
     m_per_draw_cb(nullptr),
-    m_palette_cb(nullptr),
-    m_depth_nearest(nullptr) {}
+    m_palette_cb(nullptr) {}
 
 MaskGeometryPass::~MaskGeometryPass()
 {
@@ -295,15 +294,8 @@ bool MaskGeometryPass::create_pipeline(REX::W32::ID3D11Device* device)
     cb.byteWidth = static_cast<uint32_t>(Palette_CB_Bytes);
     device->CreateBuffer(&cb, nullptr, &m_palette_cb);
 
-    // Reverse-Z nearest test (GREATER): no CommonStates equivalent - the pipeline is reverse-Z.
-    REX::W32::D3D11_DEPTH_STENCIL_DESC depth{};
-    depth.depthEnable = true;
-    depth.depthWriteMask = REX::W32::D3D11_DEPTH_WRITE_MASK_ALL;
-    depth.depthFunc = REX::W32::D3D11_COMPARISON_GREATER;
-    device->CreateDepthStencilState(&depth, &m_depth_nearest);
-
     bool const ready = m_ref_vs_static && m_ref_vs_skinned && m_ref_ps_mask &&
-                       m_per_draw_cb && m_palette_cb && m_depth_nearest;
+                       m_per_draw_cb && m_palette_cb;
     if (!ready)
         return false;
 
@@ -314,11 +306,6 @@ bool MaskGeometryPass::create_pipeline(REX::W32::ID3D11Device* device)
 void MaskGeometryPass::release()
 {
     // The shader objects and blobs are owned by the ShaderManager - not released here.
-    if (m_depth_nearest)
-    {
-        m_depth_nearest->Release();
-        m_depth_nearest = nullptr;
-    }
     if (m_palette_cb)
     {
         m_palette_cb->Release();
