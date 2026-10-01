@@ -6,6 +6,10 @@
 
 - Fix corpse highlights drawing over the game HUD and menus; preserve D3D11 render state and compose transparent targets with correct straight-color and premultiplied outline alpha.
 
+### Changed
+
+- Hide the highlights whenever the native interface hides the HUD: the pre-UI draw now consults the engine's menu state (blocking menus such as the inventory, pause menus, loading screens, the menu-system master switch, and the MCP settings window) instead of drawing every frame, so opening the backpack or the system menu also clears the corpse highlights.
+
 ## [2.1.0] - 2026-09-25
 
 ### Changed

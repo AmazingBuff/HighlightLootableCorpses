@@ -17,6 +17,8 @@ PulseDurationMs={}
 ; corpse scan interval in milliseconds
 ScanIntervalMs={}
 [Display]
+; keep the overlay visible while the interface hides the HUD (menus open, game paused, loading screens); the engine UI visibility check is skipped when true
+OverlayWhenInterfaceHidden={}
 ; corpse display style: silhouette (filled mask, 0) | outline (bright core plus outward glow, 1) | icon (distance-scaled arrows above corpses; nearby crowded targets share a double arrow, 2)
 ; usually, icon mode has best performance, then silhouette mode, outline is the worst
 DisplayMode={}
@@ -119,6 +121,7 @@ void Setting::load() noexcept
     m_config.pulse_duration_ms = ini.GetLongValue("General", "PulseDurationMs");
     m_config.scan_interval_ms = ini.GetLongValue("General", "ScanIntervalMs");
 
+    m_config.overlay_when_interface_hidden = ini.GetBoolValue("Display", "OverlayWhenInterfaceHidden");
     m_config.display_mode = static_cast<Config::DisplayMode>(ini.GetLongValue("Display", "DisplayMode"));
     m_config.outline_thickness = ini.GetLongValue("Display", "OutlineThickness");
     m_config.icon_radius = ini.GetLongValue("Display", "IconRadius");
@@ -151,6 +154,8 @@ void Setting::save() noexcept
         static_cast<int>(m_config.hotkey_mode),
         m_config.pulse_duration_ms,
         m_config.scan_interval_ms,
+
+        m_config.overlay_when_interface_hidden ? "true" : "false",
         static_cast<int>(m_config.display_mode),
         m_config.outline_thickness,
         m_config.icon_radius,
@@ -159,6 +164,7 @@ void Setting::save() noexcept
         m_config.max_distance,
         m_config.fade_start_distance,
         m_config.fade_power,
+
         m_config.hide_searched_enabled ? "true" : "false",
         m_config.value_filter_enabled ? "true" : "false",
         m_config.value_quest_items ? "true" : "false",

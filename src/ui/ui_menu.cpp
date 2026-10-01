@@ -89,6 +89,8 @@ namespace
     {
         Config& cfg = Setting::instance().get_config();
 
+        ImGuiMCP::Checkbox("Show While Interface Hidden", &cfg.overlay_when_interface_hidden);
+
         size_t mode_index = static_cast<size_t>(cfg.display_mode);
         if (ImGuiMCP::Button(fmt::format("Display Mode: {}", s_display_mode_names[mode_index]).c_str()))
         {

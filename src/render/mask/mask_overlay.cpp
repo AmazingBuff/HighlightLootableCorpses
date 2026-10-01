@@ -17,14 +17,14 @@ MASK_NAMESPACE_BEGIN
 namespace
 {
     [[nodiscard]] ROI::Region group_region(
-        std::span<GeometryTarget const> group,
+        std::span<RenderGeometry const> group,
         DirectX::XMFLOAT4X4 const& view_proj,
         uint32_t width,
         uint32_t height)
     {
         std::vector<ROI::Sphere> spheres;
         spheres.reserve(group.size());
-        for (auto const& [index, draw] : group)
+        for (RenderGeometry const& draw : group)
         {
             if (!draw.node)
                 return ROI::full_region();

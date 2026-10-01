@@ -16,6 +16,7 @@
 #include "render/shader_manager.h"
 #include "search/corpse_finder.h"
 #include "ui/pulse_timer.h"
+#include "visibility.h"
 
 PLUGIN_NAMESPACE_BEGIN
 
@@ -132,6 +133,14 @@ namespace
         void on_pre_ui_draw()
         {
             schedule_scan();
+
+            // The engine calls DrawInterfaceStart every rendered frame even when
+            // the menu system hides HUD content (menus open, loading screens,
+            // paused settings menus); mirror that decision so the overlay hides
+            // with the native interface. Verdict is cached on the main thread -
+            // this runs on the render thread.
+            if (!Setting::instance().get_config().overlay_when_interface_hidden && !Visibility::instance().overlay_allowed())
+                return;
 
             RE::BSGraphics::Renderer* renderer = RE::BSGraphics::Renderer::GetSingleton();
             if (!renderer)
@@ -396,6 +405,7 @@ namespace
 void Renderer::install()
 {
     RenderGeometryCache::instance().install();
+    Visibility::instance().install();
     (void)UiRenderHook::instance().install(&pre_ui_callback);
 }
 

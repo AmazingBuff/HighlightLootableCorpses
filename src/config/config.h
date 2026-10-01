@@ -16,6 +16,11 @@ struct Config
     int pulse_duration_ms;
     int scan_interval_ms;
 
+
+    // keep drawing whenever the engine-hidden interface would (menus, pause,
+    // loading screens no longer suppress the overlay)
+    bool overlay_when_interface_hidden;
+
     enum class DisplayMode : uint8_t
     {
         e_silhouette = 0,

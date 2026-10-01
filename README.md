@@ -7,6 +7,7 @@ A corpse-detection overlay for **Skyrim Special Edition / Anniversary Edition** 
 ## Features
 
 - **Lootable-only highlighting** — corpses whose inventory still holds takeable items are highlighted; fully looted corpses drop out of the overlay
+- **Menu-aware visibility** — highlights follow the native interface: opening the inventory, map, journal or any other blocking or pause menu, a loading screen, or the settings panel hides them exactly like the game hides the HUD
 - **See through everything** — highlights are drawn after the scene and before native game UI, and ignore scene depth, so grass, bushes, walls, and hills never hide a corpse
 - **Three display modes** — `silhouette` (filled mask of the nearest highlighted surface per pixel), `outline` (bright core plus outward colored halo), and `icon` (downward arrows above corpse bounds; nearby crowded targets share a larger double arrow)
 - **Dead-on placement** — positions come from ragdoll bodies and Havok collision bounds, with largest-cluster handling after dismemberment and a geometry fallback
@@ -78,6 +79,7 @@ All options live in `Data\SKSE\Plugins\HighlightLootableCorpses.ini`. Every opti
 | `MaxDistance` | `500` | 500–5000 | Search radius in game units (~7 m default; 70 units ≈ 1 m). |
 | `FadeStartDistance` | `0` | 0–MaxDistance | Distance where fading begins (fully opaque below). |
 | `FadePower` | `0.1` | 0.1–4 | Fade curve exponent (higher = faster fade). |
+| `OverlayWhenInterfaceHidden` | `false` | true/false | Keep the overlay visible while the interface hides the HUD (menus open, game paused, loading screens); skips the engine UI visibility check. |
 
 Out-of-range values are clamped when loaded: an invalid `DisplayMode` (> 2) becomes outline, an invalid `HotkeyMode` (> 1) becomes constant, and an out-of-range `Hotkey` (> 0xFE) becomes unbound.
 
